@@ -35,7 +35,7 @@
 #include <ncnn/layer.h>
 #include <ncnn/cpu.h>
 
-#ifdef CIRA_VULKAN_ENABLED
+#if defined(CIRA_VULKAN_ENABLED) && NCNN_VULKAN
 #include <ncnn/gpu.h>
 #endif
 
@@ -169,7 +169,7 @@ extern "C" int ncnn_load(cira_ctx* ctx, const char* model_path) {
     /* Initialize NCNN options */
     model->use_vulkan = false;
 
-#ifdef CIRA_VULKAN_ENABLED
+#if defined(CIRA_VULKAN_ENABLED) && NCNN_VULKAN
     /* Try to initialize Vulkan */
     int gpu_count = ncnn::get_gpu_count();
     if (gpu_count > 0) {
@@ -186,6 +186,11 @@ extern "C" int ncnn_load(cira_ctx* ctx, const char* model_path) {
     /* Set NCNN options for optimal performance */
     model->net.opt.lightmode = true;
     model->net.opt.num_threads = ncnn::get_big_cpu_count();
+
+    /* Enable FP16 for better performance on supported hardware */
+    model->net.opt.use_fp16_packed = true;
+    model->net.opt.use_fp16_storage = true;
+    model->net.opt.use_fp16_arithmetic = false;  /* Keep false for detection accuracy */
 
     fprintf(stderr, "Loading NCNN model:\n");
     fprintf(stderr, "  Param:  %s\n", param_path);
@@ -282,9 +287,9 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
     cira_clear_detections(ctx);
 
     /* Create NCNN Mat from RGB data */
-    /* NCNN expects BGR, but we have RGB - need to swap channels */
+    /* Darknet models are trained on RGB, darknet2ncnn preserves channel order */
     ncnn::Mat in = ncnn::Mat::from_pixels_resize(
-        data, ncnn::Mat::PIXEL_RGB2BGR,
+        data, ncnn::Mat::PIXEL_RGB,
         w, h,
         model->input_w, model->input_h
     );
@@ -340,13 +345,13 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
                 x2 = row[5];
                 y2 = row[6];
             } else {
-                /* [x1, y1, x2, y2, score, class_id] */
-                x1 = row[0];
-                y1 = row[1];
-                x2 = row[2];
-                y2 = row[3];
-                score = row[4];
-                label_id = static_cast<int>(row[5]);
+                /* NCNN Yolov3DetectionOutput: [class_id, score, x1, y1, x2, y2] */
+                label_id = static_cast<int>(row[0]);
+                score = row[1];
+                x1 = row[2];
+                y1 = row[3];
+                x2 = row[4];
+                y2 = row[5];
             }
 
             if (score > conf_thresh) {

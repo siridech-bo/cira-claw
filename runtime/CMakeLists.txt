@@ -7,8 +7,8 @@ option(CIRA_BUILD_TESTS "Build tests" ON)
 option(CIRA_ENABLE_DARKNET "Enable Darknet loader" ON)
 option(CIRA_ENABLE_ONNX "Enable ONNX Runtime loader" ON)
 option(CIRA_ENABLE_TENSORRT "Enable TensorRT loader" OFF)
-option(CIRA_ENABLE_NCNN "Enable NCNN loader" ON)
-option(CIRA_ENABLE_VULKAN "Enable Vulkan for NCNN" ON)
+option(CIRA_ENABLE_NCNN "Enable NCNN loader" OFF)
+option(CIRA_ENABLE_VULKAN "Enable Vulkan for NCNN" OFF)
 option(CIRA_ENABLE_STREAMING "Enable HTTP streaming server" ON)
 
 # C/C++ standards

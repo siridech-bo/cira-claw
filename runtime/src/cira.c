@@ -200,6 +200,11 @@ static cira_format_t detect_format(const char* path) {
             find_file_with_ext(path, ".cfg", buf, sizeof(buf))) {
             return CIRA_FORMAT_DARKNET;
         }
+        /* Check for NCNN files (primary non-CUDA path) */
+        if (find_file_with_ext(path, ".param", buf, sizeof(buf)) &&
+            find_file_with_ext(path, ".bin", buf, sizeof(buf))) {
+            return CIRA_FORMAT_NCNN;
+        }
         /* Check for ONNX file */
         if (find_file_with_ext(path, ".onnx", buf, sizeof(buf))) {
             return CIRA_FORMAT_ONNX;
@@ -209,17 +214,15 @@ static cira_format_t detect_format(const char* path) {
             find_file_with_ext(path, ".trt", buf, sizeof(buf))) {
             return CIRA_FORMAT_TENSORRT;
         }
-        /* Check for NCNN files */
-        if (find_file_with_ext(path, ".param", buf, sizeof(buf)) &&
-            find_file_with_ext(path, ".bin", buf, sizeof(buf))) {
-            return CIRA_FORMAT_NCNN;
-        }
     } else {
         /* Check file extension */
         const char* ext = strrchr(path, '.');
         if (ext) {
             if (strcmp(ext, ".weights") == 0 || strcmp(ext, ".cfg") == 0) {
                 return CIRA_FORMAT_DARKNET;
+            }
+            if (strcmp(ext, ".param") == 0 || strcmp(ext, ".bin") == 0) {
+                return CIRA_FORMAT_NCNN;
             }
             if (strcmp(ext, ".onnx") == 0) {
                 return CIRA_FORMAT_ONNX;

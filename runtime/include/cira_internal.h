@@ -32,13 +32,13 @@ extern "C" {
 /* Maximum JSON result length */
 #define CIRA_MAX_JSON_LEN 65536
 
-/* Model format types */
+/* Model format types (ordered by priority) */
 typedef enum {
     CIRA_FORMAT_UNKNOWN = 0,
     CIRA_FORMAT_DARKNET,
+    CIRA_FORMAT_NCNN,       /* Primary non-CUDA path */
     CIRA_FORMAT_ONNX,
     CIRA_FORMAT_TENSORRT,
-    CIRA_FORMAT_NCNN,
     CIRA_FORMAT_SKLEARN
 } cira_format_t;
 
