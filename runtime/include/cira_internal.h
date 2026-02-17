@@ -38,6 +38,7 @@ typedef enum {
     CIRA_FORMAT_DARKNET,
     CIRA_FORMAT_ONNX,
     CIRA_FORMAT_TENSORRT,
+    CIRA_FORMAT_NCNN,
     CIRA_FORMAT_SKLEARN
 } cira_format_t;
 

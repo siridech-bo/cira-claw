@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(cira VERSION 1.0.0 LANGUAGES C)
+project(cira VERSION 1.0.0 LANGUAGES C CXX)
 
 # Options
 option(CIRA_BUILD_SHARED "Build shared library" ON)
@@ -7,11 +7,15 @@ option(CIRA_BUILD_TESTS "Build tests" ON)
 option(CIRA_ENABLE_DARKNET "Enable Darknet loader" ON)
 option(CIRA_ENABLE_ONNX "Enable ONNX Runtime loader" ON)
 option(CIRA_ENABLE_TENSORRT "Enable TensorRT loader" OFF)
+option(CIRA_ENABLE_NCNN "Enable NCNN loader" ON)
+option(CIRA_ENABLE_VULKAN "Enable Vulkan for NCNN" ON)
 option(CIRA_ENABLE_STREAMING "Enable HTTP streaming server" ON)
 
-# C standard
+# C/C++ standards
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Compiler warnings
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -34,6 +38,21 @@ if(CIRA_ENABLE_TENSORRT)
     find_package(TensorRT QUIET)
 endif()
 
+if(CIRA_ENABLE_NCNN)
+    find_package(ncnn QUIET)
+    if(NOT ncnn_FOUND)
+        message(STATUS "NCNN not found via find_package, will try pkg-config")
+        find_package(PkgConfig)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(NCNN ncnn)
+        endif()
+    endif()
+
+    if(CIRA_ENABLE_VULKAN)
+        find_package(Vulkan QUIET)
+    endif()
+endif()
+
 # Source files
 set(CIRA_SOURCES
     src/cira.c
@@ -49,6 +68,10 @@ endif()
 
 if(CIRA_ENABLE_TENSORRT)
     list(APPEND CIRA_SOURCES src/trt_loader.c)
+endif()
+
+if(CIRA_ENABLE_NCNN)
+    list(APPEND CIRA_SOURCES src/ncnn_loader.cpp)
 endif()
 
 if(CIRA_ENABLE_STREAMING)
@@ -88,6 +111,24 @@ endif()
 
 if(CIRA_ENABLE_DARKNET)
     target_compile_definitions(cira PRIVATE CIRA_DARKNET_ENABLED)
+endif()
+
+if(CIRA_ENABLE_NCNN)
+    if(ncnn_FOUND)
+        target_link_libraries(cira PRIVATE ncnn)
+        target_compile_definitions(cira PRIVATE CIRA_NCNN_ENABLED)
+    elseif(NCNN_FOUND)
+        target_include_directories(cira PRIVATE ${NCNN_INCLUDE_DIRS})
+        target_link_libraries(cira PRIVATE ${NCNN_LIBRARIES})
+        target_compile_definitions(cira PRIVATE CIRA_NCNN_ENABLED)
+    else()
+        message(WARNING "NCNN enabled but not found - NCNN loader will be stubbed")
+    endif()
+
+    if(CIRA_ENABLE_VULKAN AND Vulkan_FOUND)
+        target_link_libraries(cira PRIVATE Vulkan::Vulkan)
+        target_compile_definitions(cira PRIVATE CIRA_VULKAN_ENABLED)
+    endif()
 endif()
 
 if(CIRA_ENABLE_STREAMING)
@@ -142,6 +183,12 @@ if(CIRA_BUILD_TESTS)
         add_executable(test_stream test/test_stream.c)
         target_link_libraries(test_stream PRIVATE cira)
         add_test(NAME test_stream COMMAND test_stream)
+    endif()
+
+    if(CIRA_ENABLE_NCNN)
+        add_executable(test_ncnn test/test_ncnn.c)
+        target_link_libraries(test_ncnn PRIVATE cira)
+        add_test(NAME test_ncnn COMMAND test_ncnn)
     endif()
 endif()
 

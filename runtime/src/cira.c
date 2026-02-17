@@ -40,6 +40,12 @@ extern void trt_unload(cira_ctx* ctx);
 extern int trt_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels);
 #endif
 
+#ifdef CIRA_NCNN_ENABLED
+extern int ncnn_load(cira_ctx* ctx, const char* model_path);
+extern void ncnn_unload(cira_ctx* ctx);
+extern int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels);
+#endif
+
 #ifdef CIRA_STREAMING_ENABLED
 extern int camera_start(cira_ctx* ctx, int device_id);
 extern int camera_stop(cira_ctx* ctx);
@@ -203,6 +209,11 @@ static cira_format_t detect_format(const char* path) {
             find_file_with_ext(path, ".trt", buf, sizeof(buf))) {
             return CIRA_FORMAT_TENSORRT;
         }
+        /* Check for NCNN files */
+        if (find_file_with_ext(path, ".param", buf, sizeof(buf)) &&
+            find_file_with_ext(path, ".bin", buf, sizeof(buf))) {
+            return CIRA_FORMAT_NCNN;
+        }
     } else {
         /* Check file extension */
         const char* ext = strrchr(path, '.');
@@ -312,6 +323,11 @@ void cira_destroy(cira_ctx* ctx) {
             trt_unload(ctx);
             break;
 #endif
+#ifdef CIRA_NCNN_ENABLED
+        case CIRA_FORMAT_NCNN:
+            ncnn_unload(ctx);
+            break;
+#endif
         default:
             break;
     }
@@ -347,6 +363,11 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
 #ifdef CIRA_TRT_ENABLED
             case CIRA_FORMAT_TENSORRT:
                 trt_unload(ctx);
+                break;
+#endif
+#ifdef CIRA_NCNN_ENABLED
+            case CIRA_FORMAT_NCNN:
+                ncnn_unload(ctx);
                 break;
 #endif
             default:
@@ -396,6 +417,11 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
             result = trt_load(ctx, config_path);
             break;
 #endif
+#ifdef CIRA_NCNN_ENABLED
+        case CIRA_FORMAT_NCNN:
+            result = ncnn_load(ctx, config_path);
+            break;
+#endif
         default:
             cira_set_error(ctx, "Model format not supported in this build");
             return CIRA_ERROR_MODEL;
@@ -440,6 +466,11 @@ int cira_predict_image(cira_ctx* ctx, const uint8_t* data, int w, int h, int cha
 #ifdef CIRA_TRT_ENABLED
         case CIRA_FORMAT_TENSORRT:
             result = trt_predict(ctx, data, w, h, channels);
+            break;
+#endif
+#ifdef CIRA_NCNN_ENABLED
+        case CIRA_FORMAT_NCNN:
+            result = ncnn_predict(ctx, data, w, h, channels);
             break;
 #endif
         default:
