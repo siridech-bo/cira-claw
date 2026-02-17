@@ -247,5 +247,5 @@ MIT License - CiRA Robotics / KMITL
 
 ## Support
 
-- Issues: https://github.com/cira-ami/cira-claw/issues
+- Issues: https://github.com/siridech-bo/cira-claw/issues
 - Documentation: https://docs.cira.io/claw

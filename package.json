@@ -47,11 +47,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cira-ami/cira-claw.git"
+    "url": "https://github.com/siridech-bo/cira-claw.git"
   },
-  "homepage": "https://github.com/cira-ami/cira-claw#readme",
+  "homepage": "https://github.com/siridech-bo/cira-claw#readme",
   "bugs": {
-    "url": "https://github.com/cira-ami/cira-claw/issues"
+    "url": "https://github.com/siridech-bo/cira-claw/issues"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
