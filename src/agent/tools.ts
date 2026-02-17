@@ -1,6 +1,16 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { NodeSSH } from 'node-ssh';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('tools');
+
+// Get workspace path (same logic as config.ts)
+function getWorkspacePath(): string {
+  const ciraHome = process.env.CIRA_HOME || path.join(os.homedir(), '.cira');
+  return path.join(ciraHome, 'workspace');
+}
 
 export interface Tool {
   name: string;
@@ -353,92 +363,352 @@ export async function executeToolCall(
       const nodeId = input.node_id as string;
       const period = input.period as string;
 
-      // In a real implementation, this would query stored inference data
-      // For now, return placeholder data
-      return {
-        data: {
-          node_id: nodeId,
-          period,
-          total_defects: 147,
-          defects_per_hour: 12.25,
-          avg_confidence: 0.942,
-          by_label: {
-            scratch: 89,
-            dent: 42,
-            crack: 16,
+      if (!nodeManager) {
+        return { data: { error: 'Node manager not available' } };
+      }
+
+      const node = nodeManager.getNode(nodeId);
+      if (!node) {
+        return { data: { error: `Node '${nodeId}' not found` } };
+      }
+
+      const status = nodeManager.getNodeStatus(nodeId);
+      if (status?.status !== 'online') {
+        return { data: { error: `Node '${nodeId}' is not online` } };
+      }
+
+      try {
+        // Query the node's REST API for inference stats
+        const port = node.runtime?.port || 8080;
+        const url = `http://${node.host}:${port}/api/stats?period=${period}`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          // If endpoint doesn't exist, return basic stats from status
+          if (response.status === 404) {
+            return {
+              data: {
+                node_id: nodeId,
+                period,
+                note: 'Node does not support detailed stats endpoint',
+                current_inference: status?.inference || null,
+              },
+            };
+          }
+          return { data: { error: `Failed to get stats: HTTP ${response.status}` } };
+        }
+
+        const stats = await response.json() as Record<string, unknown>;
+
+        return {
+          data: {
+            node_id: nodeId,
+            period,
+            ...stats,
           },
-          peak_hour: '14:00-15:00',
-          peak_count: 23,
-        },
-      };
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+
+        // If fetch fails, return whatever we have from status
+        return {
+          data: {
+            node_id: nodeId,
+            period,
+            error: `Could not fetch stats: ${errorMsg}`,
+            current_inference: status?.inference || null,
+          },
+        };
+      }
     }
 
     case 'inference_results': {
       const nodeId = input.node_id as string;
       const period = input.period as string;
 
-      // In a real implementation, this would query stored inference data
-      return {
-        data: {
-          node_id: nodeId,
-          period,
-          total_detections: 147,
-          detections: [
-            { timestamp: '2026-02-17T14:32:15Z', label: 'scratch', confidence: 0.96, bbox: [120, 80, 200, 150] },
-            { timestamp: '2026-02-17T14:35:22Z', label: 'dent', confidence: 0.89, bbox: [300, 200, 100, 80] },
-          ],
-        },
-      };
+      if (!nodeManager) {
+        return { data: { error: 'Node manager not available' } };
+      }
+
+      const node = nodeManager.getNode(nodeId);
+      if (!node) {
+        return { data: { error: `Node '${nodeId}' not found` } };
+      }
+
+      const status = nodeManager.getNodeStatus(nodeId);
+      if (status?.status !== 'online') {
+        return { data: { error: `Node '${nodeId}' is not online` } };
+      }
+
+      try {
+        // Query the node's REST API for inference results
+        const port = node.runtime?.port || 8080;
+        const url = `http://${node.host}:${port}/api/results?period=${period}`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            return {
+              data: {
+                node_id: nodeId,
+                period,
+                note: 'Node does not support results endpoint',
+                current_inference: status?.inference || null,
+              },
+            };
+          }
+          return { data: { error: `Failed to get results: HTTP ${response.status}` } };
+        }
+
+        const results = await response.json() as Record<string, unknown>;
+
+        return {
+          data: {
+            node_id: nodeId,
+            period,
+            ...results,
+          },
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        return {
+          data: {
+            node_id: nodeId,
+            period,
+            error: `Could not fetch results: ${errorMsg}`,
+            current_inference: status?.inference || null,
+          },
+        };
+      }
     }
 
     case 'model_list': {
-      // In a real implementation, this would scan the workspace models directory
-      return {
-        data: {
-          models: [
-            {
-              name: 'scratch_v3',
-              task: 'detection',
-              format: 'darknet',
-              labels: ['scratch', 'dent', 'crack'],
-              size: '23.5 MB',
-            },
-            {
-              name: 'scratch_v4',
-              task: 'detection',
-              format: 'onnx',
-              labels: ['scratch', 'dent', 'crack', 'chip'],
-              size: '45.2 MB',
-            },
-          ],
-        },
-      };
+      const modelsPath = path.join(getWorkspacePath(), 'models');
+
+      if (!fs.existsSync(modelsPath)) {
+        return {
+          data: {
+            models: [],
+            note: 'Models directory does not exist',
+            path: modelsPath,
+          },
+        };
+      }
+
+      try {
+        const entries = fs.readdirSync(modelsPath, { withFileTypes: true });
+        const models: Array<{
+          name: string;
+          task: string;
+          format: string;
+          labels: string[];
+          size: string;
+          files: string[];
+        }> = [];
+
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+
+          const modelDir = path.join(modelsPath, entry.name);
+          const files = fs.readdirSync(modelDir);
+
+          // Detect model format and gather info
+          let format = 'unknown';
+          let labels: string[] = [];
+          let totalSize = 0;
+
+          for (const file of files) {
+            const filePath = path.join(modelDir, file);
+            const stats = fs.statSync(filePath);
+            totalSize += stats.size;
+
+            // Detect format from file extensions
+            if (file.endsWith('.weights') || file.endsWith('.cfg')) {
+              format = 'darknet';
+            } else if (file.endsWith('.onnx')) {
+              format = 'onnx';
+            } else if (file.endsWith('.engine') || file.endsWith('.trt')) {
+              format = 'tensorrt';
+            } else if (file.endsWith('.pkl') || file.endsWith('.joblib')) {
+              format = 'sklearn';
+            }
+
+            // Read labels from obj.names or labels.txt
+            if (file === 'obj.names' || file === 'labels.txt') {
+              try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                labels = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+              } catch {
+                // Ignore read errors
+              }
+            }
+          }
+
+          // Format size
+          const sizeStr = totalSize > 1024 * 1024
+            ? `${(totalSize / (1024 * 1024)).toFixed(1)} MB`
+            : `${(totalSize / 1024).toFixed(1)} KB`;
+
+          models.push({
+            name: entry.name,
+            task: 'detection', // Default; could be inferred from config file
+            format,
+            labels,
+            size: sizeStr,
+            files,
+          });
+        }
+
+        return {
+          data: {
+            models,
+            count: models.length,
+            path: modelsPath,
+          },
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        return { data: { error: `Failed to list models: ${errorMsg}` } };
+      }
     }
 
     case 'model_deploy': {
       const modelName = input.model_name as string;
       const nodeId = input.node_id as string;
 
-      // In a real implementation, this would:
-      // 1. Verify model exists
-      // 2. SSH to node
-      // 3. Copy model files
-      // 4. Update config
-      // 5. Restart runtime
-      // 6. Run verification
+      if (!nodeManager) {
+        return { data: { error: 'Node manager not available' } };
+      }
 
-      return {
-        data: {
-          status: 'success',
-          model_name: modelName,
-          node_id: nodeId,
-          message: `Model '${modelName}' deployed to '${nodeId}' successfully`,
-          test_results: {
-            accuracy: 0.982,
-            test_images: 50,
+      // 1. Verify model exists locally
+      const modelPath = path.join(getWorkspacePath(), 'models', modelName);
+      if (!fs.existsSync(modelPath)) {
+        return { data: { error: `Model '${modelName}' not found in workspace` } };
+      }
+
+      // 2. Get node info
+      const node = nodeManager.getNode(nodeId);
+      if (!node) {
+        return { data: { error: `Node '${nodeId}' not found` } };
+      }
+
+      const status = nodeManager.getNodeStatus(nodeId);
+      if (status?.status !== 'online') {
+        return { data: { error: `Node '${nodeId}' is not online` } };
+      }
+
+      // 3. Get SSH credentials
+      const sshUser = node.ssh?.user || 'cira';
+      const sshPort = node.ssh?.port || 22;
+      const sshKeyPath = node.ssh?.key || path.join(os.homedir(), '.ssh', 'id_rsa');
+      const remoteModelPath = `/home/${sshUser}/.cira/models/${modelName}`;
+
+      const ssh = new NodeSSH();
+
+      try {
+        // 4. Connect via SSH
+        logger.info(`Connecting to ${node.host} via SSH...`);
+
+        const sshConfig: { host: string; username: string; port: number; privateKey?: string; password?: string } = {
+          host: node.host,
+          username: sshUser,
+          port: sshPort,
+        };
+
+        // Use key file if it exists, otherwise try password
+        if (fs.existsSync(sshKeyPath)) {
+          sshConfig.privateKey = fs.readFileSync(sshKeyPath, 'utf-8');
+        } else if (node.ssh?.password) {
+          sshConfig.password = node.ssh.password;
+        } else {
+          return { data: { error: `No SSH credentials available for node '${nodeId}'` } };
+        }
+
+        await ssh.connect(sshConfig);
+        logger.info(`Connected to ${node.host}`);
+
+        // 5. Create remote directory
+        await ssh.execCommand(`mkdir -p ${remoteModelPath}`);
+
+        // 6. Copy model files
+        const localFiles = fs.readdirSync(modelPath);
+        const copiedFiles: string[] = [];
+
+        for (const file of localFiles) {
+          const localFilePath = path.join(modelPath, file);
+          const remoteFilePath = `${remoteModelPath}/${file}`;
+
+          await ssh.putFile(localFilePath, remoteFilePath);
+          copiedFiles.push(file);
+          logger.debug(`Copied ${file} to ${node.host}`);
+        }
+
+        // 7. Update model config (create a simple config pointing to the new model)
+        const modelConfig = {
+          name: modelName,
+          path: remoteModelPath,
+          deployed_at: new Date().toISOString(),
+        };
+
+        await ssh.execCommand(
+          `echo '${JSON.stringify(modelConfig, null, 2)}' > ${remoteModelPath}/deploy.json`
+        );
+
+        // 8. Restart runtime service (if running as systemd service)
+        const restartResult = await ssh.execCommand('sudo systemctl restart cira-runtime || true');
+        logger.debug(`Runtime restart: ${restartResult.stdout || restartResult.stderr || 'OK'}`);
+
+        // 9. Wait a moment and verify
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // 10. Check if runtime is responding
+        let verification = { success: false, message: '' };
+        try {
+          const port = node.runtime?.port || 8080;
+          const verifyResponse = await fetch(`http://${node.host}:${port}/health`, {
+            signal: AbortSignal.timeout(5000),
+          });
+          if (verifyResponse.ok) {
+            verification = { success: true, message: 'Runtime responding' };
+          } else {
+            verification = { success: false, message: `Runtime returned HTTP ${verifyResponse.status}` };
+          }
+        } catch (verifyError) {
+          verification = {
+            success: false,
+            message: verifyError instanceof Error ? verifyError.message : 'Verification failed',
+          };
+        }
+
+        ssh.dispose();
+
+        return {
+          data: {
+            status: 'success',
+            model_name: modelName,
+            node_id: nodeId,
+            message: `Model '${modelName}' deployed to '${nodeId}'`,
+            files_copied: copiedFiles,
+            remote_path: remoteModelPath,
+            verification,
           },
-        },
-      };
+        };
+      } catch (error) {
+        ssh.dispose();
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        logger.error(`Model deploy failed: ${errorMsg}`);
+        return { data: { error: `Deployment failed: ${errorMsg}` } };
+      }
     }
 
     case 'alert_list': {

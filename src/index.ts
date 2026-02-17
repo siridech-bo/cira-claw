@@ -1,8 +1,14 @@
+import fs from 'fs';
+import path from 'path';
 import { getConfigLoader, ConfigLoader } from './config.js';
 import { createGatewayServer, GatewayServer } from './gateway/server.js';
 import { registerApiRoutes } from './gateway/routes/api.js';
 import { registerWebSocketRoutes, WebSocketHandler } from './gateway/websocket.js';
+import { registerChatRoutes } from './gateway/chat.js';
 import { getNodeManager, NodeManager } from './nodes/manager.js';
+import { getAgent, CiraAgent } from './agent/agent.js';
+import { createLineChannel, LineChannel } from './channels/line.js';
+import { createMqttChannel, MqttChannel } from './channels/mqtt.js';
 import { createLogger, logger as rootLogger } from './utils/logger.js';
 import { CiraConfig } from './utils/config-schema.js';
 
@@ -13,6 +19,9 @@ let configLoader: ConfigLoader;
 let nodeManager: NodeManager;
 let gateway: GatewayServer;
 let wsHandler: WebSocketHandler;
+let agent: CiraAgent;
+let lineChannel: LineChannel | null = null;
+let mqttChannel: MqttChannel | null = null;
 let config: CiraConfig;
 let configPath: string | undefined;
 let isShuttingDown = false;
@@ -40,19 +49,17 @@ async function gracefulShutdown(signal: string): Promise<void> {
     logger.debug('Stopping health checks...');
     nodeManager?.stopHealthChecks();
 
+    // Disconnect MQTT channel
+    if (mqttChannel?.isConnected()) {
+      logger.debug('Disconnecting MQTT...');
+      await mqttChannel.disconnect();
+    }
+
     // Close HTTP/WebSocket server
     logger.debug('Closing gateway server...');
     if (gateway) {
       await gateway.stop();
     }
-
-    // TODO: Disconnect SSH connections when SSH manager is implemented
-    // logger.debug('Closing SSH connections...');
-    // await sshManager?.disconnectAll();
-
-    // TODO: Disconnect MQTT when fully integrated
-    // logger.debug('Disconnecting MQTT...');
-    // await mqttChannel?.disconnect();
 
     // Flush logs (give pino time to flush)
     logger.info('Shutdown complete');
@@ -197,8 +204,53 @@ async function main(): Promise<void> {
     // Register API routes
     await registerApiRoutes(gateway.fastify, nodeManager);
 
-    // Register WebSocket handler
+    // Register WebSocket handler for real-time node data
     wsHandler = await registerWebSocketRoutes(gateway.fastify, nodeManager);
+
+    // Initialize AI agent
+    agent = getAgent(config.agent, configLoader.workspacePath);
+    await agent.init();
+
+    if (agent.isAvailable()) {
+      logger.info('AI agent initialized');
+    } else {
+      logger.warn('AI agent not available - no API key configured');
+    }
+
+    // Register WebChat routes for agent chat
+    await registerChatRoutes(gateway.fastify, agent, nodeManager);
+
+    // Initialize LINE channel if enabled
+    if (config.channels.line.enabled) {
+      const lineCredentials = await loadLineCredentials(configLoader.credentialsPath);
+      if (lineCredentials) {
+        lineChannel = createLineChannel(lineCredentials, agent, nodeManager);
+        await lineChannel.register(gateway.fastify);
+        logger.info('LINE channel registered');
+      } else {
+        logger.warn('LINE channel enabled but credentials not found');
+      }
+    }
+
+    // Initialize MQTT channel if enabled
+    if (config.channels.mqtt.enabled) {
+      mqttChannel = createMqttChannel(
+        {
+          broker: config.channels.mqtt.broker,
+          topics: config.channels.mqtt.topics,
+        },
+        agent,
+        nodeManager
+      );
+
+      try {
+        await mqttChannel.connect();
+        logger.info('MQTT channel connected');
+      } catch (error) {
+        logger.warn(`Failed to connect MQTT: ${error}`);
+        mqttChannel = null;
+      }
+    }
 
     // Start health checks
     nodeManager.startHealthChecks(30000); // Every 30 seconds
@@ -216,6 +268,7 @@ async function main(): Promise<void> {
     logger.info(`  Web Dashboard: http://${host}:${port}`);
     logger.info(`  API: http://${host}:${port}/api`);
     logger.info(`  WebSocket: ws://${host}:${port}/ws`);
+    logger.info(`  Chat: ws://${host}:${port}/chat`);
     logger.info(`  Health: http://${host}:${port}/health`);
 
     // Log ready status for systemd
@@ -226,6 +279,35 @@ async function main(): Promise<void> {
   } catch (error) {
     logger.fatal({ err: error }, 'Failed to start gateway');
     process.exit(1);
+  }
+}
+
+/**
+ * Load LINE channel credentials from credentials directory
+ */
+async function loadLineCredentials(credentialsPath: string): Promise<{ channelAccessToken: string; channelSecret: string } | null> {
+  const lineCredPath = path.join(credentialsPath, 'line.json');
+
+  if (!fs.existsSync(lineCredPath)) {
+    return null;
+  }
+
+  try {
+    const content = fs.readFileSync(lineCredPath, 'utf-8');
+    const creds = JSON.parse(content) as { channel_access_token?: string; channel_secret?: string };
+
+    if (!creds.channel_access_token || !creds.channel_secret) {
+      logger.warn('LINE credentials file missing required fields');
+      return null;
+    }
+
+    return {
+      channelAccessToken: creds.channel_access_token,
+      channelSecret: creds.channel_secret,
+    };
+  } catch (error) {
+    logger.error(`Failed to load LINE credentials: ${error}`);
+    return null;
   }
 }
 
