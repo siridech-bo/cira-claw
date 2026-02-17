@@ -1,0 +1,55 @@
+{
+  "gateway": {
+    "port": 18790,
+    "host": "0.0.0.0",
+    "name": "Factory-A Gateway"
+  },
+
+  "agent": {
+    "provider": "claude",
+    "model": "claude-sonnet-4-20250514",
+    "fallback": "ollama",
+    "ollama_url": "http://localhost:11434",
+    "ollama_model": "llama3.1:8b",
+    "workspace": "~/.cira/workspace"
+  },
+
+  "channels": {
+    "line": {
+      "enabled": true,
+      "channel_access_token": "${LINE_CHANNEL_ACCESS_TOKEN}",
+      "channel_secret": "${LINE_CHANNEL_SECRET}"
+    },
+    "telegram": {
+      "enabled": false,
+      "bot_token": "${TELEGRAM_BOT_TOKEN}"
+    },
+    "mqtt": {
+      "enabled": true,
+      "broker": "mqtt://localhost:1883",
+      "topics": {
+        "subscribe": ["cira/command/#"],
+        "publish": ["cira/results/#", "cira/alerts/#"]
+      }
+    },
+    "webchat": {
+      "enabled": true,
+      "path": "/chat"
+    }
+  },
+
+  "discovery": {
+    "mdns": {
+      "enabled": true,
+      "service_type": "_cira._tcp"
+    },
+    "manual": []
+  },
+
+  "alerts": {
+    "defect_threshold": 10,
+    "temperature_max": 80,
+    "fps_min": 5,
+    "notify_channels": ["line", "mqtt"]
+  }
+}

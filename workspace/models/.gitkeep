@@ -1,0 +1,10 @@
+# This directory stores AI models
+# Place your models here:
+#
+# scratch_v3/
+#   ├── scratch_v3.weights
+#   ├── scratch_v3.cfg
+#   └── obj.names
+#
+# Or ONNX models:
+#   scratch_v4.onnx

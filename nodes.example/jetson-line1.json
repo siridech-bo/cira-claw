@@ -1,0 +1,31 @@
+{
+  "id": "jetson-line1",
+  "name": "Production Line 1 - Jetson Nano",
+  "type": "jetson-nano",
+  "host": "192.168.1.101",
+  "ssh": {
+    "user": "cira",
+    "key": "~/.cira/credentials/jetson-line1.key",
+    "port": 22
+  },
+  "runtime": {
+    "port": 8080,
+    "config": "/home/cira/.cira/model_config.json"
+  },
+  "cameras": [
+    {
+      "id": "cam0",
+      "device": 0,
+      "name": "Inspection Camera",
+      "resolution": "1280x720"
+    }
+  ],
+  "models": [
+    {
+      "name": "scratch_v3",
+      "task": "detection",
+      "labels": ["scratch", "dent", "crack"]
+    }
+  ],
+  "location": "Building A, Line 1, Station 3"
+}

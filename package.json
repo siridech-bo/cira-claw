@@ -1,0 +1,86 @@
+{
+  "name": "cira-claw",
+  "version": "1.0.0",
+  "description": "CiRA CLAW - AI-powered edge inference gateway for factory environments",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "cira": "./dist/cli/cira.js",
+    "cira-claw": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:dashboard": "cd dashboard && npm install && npm run build",
+    "build:all": "npm run build && npm run build:dashboard",
+    "dev": "tsx watch src/index.ts",
+    "start": "NODE_ENV=production node dist/index.js",
+    "start:dev": "NODE_ENV=development node dist/index.js",
+    "cli": "tsx cli/cira.ts",
+    "test": "vitest",
+    "lint": "eslint src/**/*.ts",
+    "dashboard:dev": "cd dashboard && npm run dev",
+    "dashboard:build": "cd dashboard && npm run build",
+    "install-daemon": "sudo bash scripts/install.sh",
+    "service:start": "sudo systemctl start cira-claw",
+    "service:stop": "sudo systemctl stop cira-claw",
+    "service:restart": "sudo systemctl restart cira-claw",
+    "service:reload": "sudo systemctl reload cira-claw",
+    "service:status": "systemctl status cira-claw",
+    "service:logs": "journalctl -u cira-claw -f",
+    "service:enable": "sudo systemctl enable cira-claw",
+    "service:disable": "sudo systemctl disable cira-claw",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "edge-ai",
+    "inference",
+    "jetson",
+    "iot",
+    "cira",
+    "vision",
+    "factory",
+    "yolo",
+    "darknet"
+  ],
+  "author": "CiRA Robotics / KMITL",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cira-ami/cira-claw.git"
+  },
+  "homepage": "https://github.com/cira-ami/cira-claw#readme",
+  "bugs": {
+    "url": "https://github.com/cira-ami/cira-claw/issues"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/static": "^7.0.4",
+    "@fastify/websocket": "^10.0.1",
+    "@line/bot-sdk": "^9.6.0",
+    "ajv": "^8.17.1",
+    "bonjour-service": "^1.3.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
+    "fastify": "^4.28.1",
+    "mqtt": "^5.10.1",
+    "node-ssh": "^13.2.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "telegraf": "^4.16.3",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

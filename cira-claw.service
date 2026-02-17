@@ -1,0 +1,65 @@
+[Unit]
+Description=CiRA CLAW Gateway
+Documentation=https://github.com/cira-ami/cira-claw
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cira
+Group=cira
+WorkingDirectory=/opt/cira-claw
+
+# Main process
+ExecStart=/usr/bin/node dist/index.js --config /home/cira/.cira/cira.json
+
+# Reload configuration on SIGHUP
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy
+Restart=always
+RestartSec=1
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Environment
+Environment=NODE_ENV=production
+Environment=CIRA_HOME=/home/cira/.cira
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=80%
+
+# Logging to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cira-claw
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallArchitectures=native
+
+# Allow read-write access to cira home directory
+ReadWritePaths=/home/cira/.cira
+
+# Allow network access
+PrivateNetwork=false
+
+# Capabilities - drop all except network binding
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

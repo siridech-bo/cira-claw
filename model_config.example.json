@@ -1,0 +1,68 @@
+{
+  "name": "scratch-detector-line1",
+  "version": "1.0.0",
+  "task": "detection",
+
+  "model": {
+    "path": "models/scratch_v3",
+    "format": "auto",
+    "labels": ["scratch", "dent", "crack"],
+    "input_size": [416, 416],
+    "confidence_threshold": 0.5,
+    "nms_threshold": 0.4
+  },
+
+  "source": {
+    "type": "camera",
+    "device": 0,
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  },
+
+  "stream": {
+    "enabled": true,
+    "port": 8080,
+    "mjpeg": {
+      "enabled": true,
+      "quality": 80,
+      "max_fps": 15,
+      "endpoints": {
+        "raw": "/stream/raw",
+        "annotated": "/stream/annotated"
+      }
+    },
+    "websocket": {
+      "enabled": true,
+      "path": "/ws/video",
+      "format": "jpeg",
+      "include_json": true
+    },
+    "snapshot": {
+      "endpoint": "/snapshot",
+      "include_annotation": true
+    }
+  },
+
+  "annotation": {
+    "bbox_color": [0, 255, 0],
+    "bbox_thickness": 2,
+    "label_size": 0.6,
+    "show_confidence": true,
+    "show_fps": true,
+    "show_timestamp": true
+  },
+
+  "output": {
+    "mqtt": {
+      "enabled": true,
+      "broker": "mqtt://192.168.1.1:1883",
+      "topic": "cira/results/line1"
+    },
+    "rest": {
+      "enabled": true,
+      "port": 8080,
+      "endpoint": "/api/results"
+    }
+  }
+}
