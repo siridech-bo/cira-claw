@@ -8,46 +8,18 @@
  */
 
 #include "cira.h"
+#include "cira_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <pthread.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 /* Version string */
 #define CIRA_VERSION_STRING "1.0.0"
-
-/* Maximum detections per frame */
-#define CIRA_MAX_DETECTIONS 256
-
-/* Maximum labels */
-#define CIRA_MAX_LABELS 256
-
-/* Maximum label length */
-#define CIRA_MAX_LABEL_LEN 64
-
-/* Maximum error message length */
-#define CIRA_MAX_ERROR_LEN 512
-
-/* Maximum JSON result length */
-#define CIRA_MAX_JSON_LEN 65536
-
-/* Model format types */
-typedef enum {
-    CIRA_FORMAT_UNKNOWN = 0,
-    CIRA_FORMAT_DARKNET,
-    CIRA_FORMAT_ONNX,
-    CIRA_FORMAT_TENSORRT,
-    CIRA_FORMAT_SKLEARN
-} cira_format_t;
-
-/* Detection result */
-typedef struct {
-    float x, y, w, h;       /* Bounding box (normalized 0-1) */
-    float confidence;       /* Detection confidence */
-    int label_id;           /* Label index */
-} cira_detection_t;
 
 /* Forward declarations for loader functions */
 #ifdef CIRA_DARKNET_ENABLED
@@ -75,51 +47,10 @@ extern int server_start(cira_ctx* ctx, int port);
 extern int server_stop(cira_ctx* ctx);
 #endif
 
-/* Context structure (internal) */
-struct cira_ctx {
-    /* Status */
-    int status;
-    char error_msg[CIRA_MAX_ERROR_LEN];
+/* === Internal Helper Functions (exported via cira_internal.h) === */
 
-    /* Model info */
-    cira_format_t format;
-    char model_path[1024];
-    void* model_handle;             /* Format-specific model data */
-
-    /* Labels */
-    char labels[CIRA_MAX_LABELS][CIRA_MAX_LABEL_LEN];
-    int num_labels;
-
-    /* Model input size */
-    int input_w;
-    int input_h;
-
-    /* Inference settings */
-    float confidence_threshold;
-    float nms_threshold;
-
-    /* Results */
-    cira_detection_t detections[CIRA_MAX_DETECTIONS];
-    int num_detections;
-    char result_json[CIRA_MAX_JSON_LEN];
-
-    /* Streaming state */
-    int camera_running;
-    int server_running;
-    int server_port;
-    pthread_t camera_thread;
-    pthread_mutex_t result_mutex;
-    float current_fps;
-
-    /* Frame buffer for streaming */
-    uint8_t* frame_buffer;
-    int frame_w;
-    int frame_h;
-    pthread_mutex_t frame_mutex;
-};
-
-/* Helper: Set error message */
-static void set_error(cira_ctx* ctx, const char* fmt, ...) {
+void cira_set_error(cira_ctx* ctx, const char* fmt, ...) {
+    if (!ctx) return;
     va_list args;
     va_start(args, fmt);
     vsnprintf(ctx->error_msg, CIRA_MAX_ERROR_LEN, fmt, args);
@@ -127,20 +58,86 @@ static void set_error(cira_ctx* ctx, const char* fmt, ...) {
     ctx->status = CIRA_STATUS_ERROR;
 }
 
-/* Helper: Check if path is a directory */
+int cira_add_detection(cira_ctx* ctx, float x, float y, float w, float h,
+                        float confidence, int label_id) {
+    if (!ctx || ctx->num_detections >= CIRA_MAX_DETECTIONS) return 0;
+
+    cira_detection_t* det = &ctx->detections[ctx->num_detections];
+    det->x = x;
+    det->y = y;
+    det->w = w;
+    det->h = h;
+    det->confidence = confidence;
+    det->label_id = label_id;
+    ctx->num_detections++;
+
+    return 1;
+}
+
+void cira_clear_detections(cira_ctx* ctx) {
+    if (!ctx) return;
+    ctx->num_detections = 0;
+}
+
+const char* cira_get_label(cira_ctx* ctx, int label_id) {
+    if (!ctx || label_id < 0 || label_id >= ctx->num_labels) {
+        return "unknown";
+    }
+    return ctx->labels[label_id];
+}
+
+void cira_store_frame(cira_ctx* ctx, const uint8_t* data, int w, int h) {
+    if (!ctx || !data) return;
+
+    pthread_mutex_lock(&ctx->frame_mutex);
+
+    int size = w * h * 3;
+
+    /* Reallocate if size changed */
+    if (ctx->frame_size != size) {
+        if (ctx->frame_buffer) {
+            free(ctx->frame_buffer);
+        }
+        ctx->frame_buffer = (uint8_t*)malloc(size);
+        ctx->frame_size = size;
+    }
+
+    if (ctx->frame_buffer) {
+        memcpy(ctx->frame_buffer, data, size);
+        ctx->frame_w = w;
+        ctx->frame_h = h;
+    }
+
+    pthread_mutex_unlock(&ctx->frame_mutex);
+}
+
+const uint8_t* cira_get_frame(cira_ctx* ctx, int* w, int* h) {
+    if (!ctx || !ctx->frame_buffer) {
+        if (w) *w = 0;
+        if (h) *h = 0;
+        return NULL;
+    }
+
+    if (w) *w = ctx->frame_w;
+    if (h) *h = ctx->frame_h;
+    return ctx->frame_buffer;
+}
+
+/* === Private Helper Functions === */
+
+/* Check if path is a directory */
 static int is_directory(const char* path) {
     struct stat st;
     if (stat(path, &st) != 0) return 0;
     return S_ISDIR(st.st_mode);
 }
 
-/* Helper: Check if file exists */
+/* Check if file exists */
 static int file_exists(const char* path) {
-    struct stat st;
-    return stat(path, &st) == 0;
+    return access(path, F_OK) == 0;
 }
 
-/* Helper: Find file with extension in directory */
+/* Find file with extension in directory */
 static int find_file_with_ext(const char* dir, const char* ext, char* out, size_t out_size) {
     DIR* d = opendir(dir);
     if (!d) return 0;
@@ -162,7 +159,7 @@ static int find_file_with_ext(const char* dir, const char* ext, char* out, size_
     return 0;
 }
 
-/* Helper: Load labels from file */
+/* Load labels from file */
 static int load_labels(cira_ctx* ctx, const char* path) {
     FILE* f = fopen(path, "r");
     if (!f) return 0;
@@ -188,7 +185,7 @@ static int load_labels(cira_ctx* ctx, const char* path) {
     return ctx->num_labels;
 }
 
-/* Helper: Detect model format from path */
+/* Detect model format from path */
 static cira_format_t detect_format(const char* path) {
     if (is_directory(path)) {
         /* Check for Darknet files in directory */
@@ -228,7 +225,7 @@ static cira_format_t detect_format(const char* path) {
     return CIRA_FORMAT_UNKNOWN;
 }
 
-/* Helper: Build JSON result string */
+/* Build JSON result string */
 static void build_result_json(cira_ctx* ctx, int img_w, int img_h) {
     char* p = ctx->result_json;
     char* end = ctx->result_json + CIRA_MAX_JSON_LEN;
@@ -276,6 +273,9 @@ cira_ctx* cira_create(void) {
 
     pthread_mutex_init(&ctx->result_mutex, NULL);
     pthread_mutex_init(&ctx->frame_mutex, NULL);
+
+    /* Initialize empty result JSON */
+    strcpy(ctx->result_json, "{\"detections\":[],\"count\":0}");
 
     return ctx;
 }
@@ -353,12 +353,13 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
                 break;
         }
         ctx->format = CIRA_FORMAT_UNKNOWN;
+        ctx->model_handle = NULL;
     }
 
     /* Detect model format */
     cira_format_t format = detect_format(config_path);
     if (format == CIRA_FORMAT_UNKNOWN) {
-        set_error(ctx, "Unknown model format: %s", config_path);
+        cira_set_error(ctx, "Unknown model format: %s", config_path);
         return CIRA_ERROR_MODEL;
     }
 
@@ -372,7 +373,8 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
             snprintf(label_path, sizeof(label_path), "%s/labels.txt", config_path);
         }
         if (file_exists(label_path)) {
-            load_labels(ctx, label_path);
+            int n = load_labels(ctx, label_path);
+            fprintf(stderr, "Loaded %d labels from %s\n", n, label_path);
         }
     }
 
@@ -395,7 +397,7 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
             break;
 #endif
         default:
-            set_error(ctx, "Model format not supported in this build");
+            cira_set_error(ctx, "Model format not supported in this build");
             return CIRA_ERROR_MODEL;
     }
 
@@ -411,8 +413,12 @@ int cira_predict_image(cira_ctx* ctx, const uint8_t* data, int w, int h, int cha
     if (!ctx || !data) return CIRA_ERROR_INPUT;
     if (ctx->status != CIRA_STATUS_READY) return CIRA_ERROR;
     if (channels != 3) {
-        set_error(ctx, "Only 3-channel images supported");
+        cira_set_error(ctx, "Only 3-channel images supported");
         return CIRA_ERROR_INPUT;
+    }
+    if (ctx->format == CIRA_FORMAT_UNKNOWN || !ctx->model_handle) {
+        cira_set_error(ctx, "No model loaded");
+        return CIRA_ERROR_MODEL;
     }
 
     pthread_mutex_lock(&ctx->result_mutex);
@@ -454,12 +460,12 @@ int cira_predict_sensor(cira_ctx* ctx, const float* values, int count) {
 
     /* Sensor prediction is only supported for sklearn models */
     if (ctx->format != CIRA_FORMAT_SKLEARN) {
-        set_error(ctx, "Sensor prediction requires sklearn model");
+        cira_set_error(ctx, "Sensor prediction requires sklearn model");
         return CIRA_ERROR_MODEL;
     }
 
     /* TODO: Implement sklearn prediction */
-    set_error(ctx, "Sklearn prediction not yet implemented");
+    cira_set_error(ctx, "Sklearn prediction not yet implemented");
     return CIRA_ERROR;
 }
 
@@ -468,19 +474,16 @@ int cira_predict_batch(cira_ctx* ctx, const uint8_t** images, int count, int w, 
 
     /* For now, just process images one by one */
     /* TODO: Implement true batch processing for supported backends */
-    int total_detections = 0;
-
     for (int i = 0; i < count; i++) {
         int result = cira_predict_image(ctx, images[i], w, h, channels);
         if (result != CIRA_OK) return result;
-        total_detections += ctx->num_detections;
     }
 
     return CIRA_OK;
 }
 
 const char* cira_result_json(cira_ctx* ctx) {
-    if (!ctx) return "{}";
+    if (!ctx) return "{\"detections\":[],\"count\":0}";
     return ctx->result_json;
 }
 

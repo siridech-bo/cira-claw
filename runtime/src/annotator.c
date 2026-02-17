@@ -9,6 +9,7 @@
  */
 
 #include "cira.h"
+#include "cira_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

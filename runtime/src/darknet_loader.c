@@ -16,11 +16,13 @@
  */
 
 #include "cira.h"
+#include "cira_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #ifdef CIRA_DARKNET_ENABLED
 
@@ -41,7 +43,7 @@ typedef struct detection {
     int sort_class;
 } detection;
 
-/* Darknet function prototypes */
+/* Darknet function prototypes - these come from libdarknet.so */
 extern network *load_network(char *cfg, char *weights, int clear);
 extern void free_network(network *net);
 extern void set_batch_network(network *net, int b);
@@ -64,17 +66,6 @@ typedef struct {
     int input_h;
     int num_classes;
 } darknet_model_t;
-
-/* Access to cira_ctx internals */
-extern void set_error(cira_ctx* ctx, const char* fmt, ...);
-
-/* Defined in cira.c - we need access to ctx internals */
-struct cira_ctx;
-
-/* Maximum detections */
-#define MAX_DETECTIONS 256
-#define MAX_LABELS 256
-#define MAX_LABEL_LEN 64
 
 /* Helper: Check if path is a directory */
 static int is_dir(const char* path) {
@@ -105,10 +96,11 @@ static int find_file_ext(const char* dir, const char* ext, char* out, size_t out
     return 0;
 }
 
-/* Helper: Convert uint8 RGB to float normalized image */
+/* Helper: Convert uint8 RGB to Darknet float image format (CHW) */
 static image make_image_from_bytes(const uint8_t* data, int w, int h, int c) {
     image im = make_image(w, h, c);
 
+    /* Convert from packed RGB (HWC) to planar (CHW) and normalize to 0-1 */
     for (int k = 0; k < c; k++) {
         for (int j = 0; j < h; j++) {
             for (int i = 0; i < w; i++) {
@@ -133,37 +125,28 @@ static image make_image_from_bytes(const uint8_t* data, int w, int h, int c) {
 int darknet_load(cira_ctx* ctx, const char* model_path) {
     char cfg_path[1024] = {0};
     char weights_path[1024] = {0};
-    char names_path[1024] = {0};
 
-    if (is_dir(model_path)) {
-        /* Find .cfg file */
-        if (!find_file_ext(model_path, ".cfg", cfg_path, sizeof(cfg_path))) {
-            fprintf(stderr, "darknet_load: No .cfg file found in %s\n", model_path);
-            return CIRA_ERROR_FILE;
-        }
-
-        /* Find .weights file */
-        if (!find_file_ext(model_path, ".weights", weights_path, sizeof(weights_path))) {
-            fprintf(stderr, "darknet_load: No .weights file found in %s\n", model_path);
-            return CIRA_ERROR_FILE;
-        }
-
-        /* Find obj.names or labels.txt */
-        snprintf(names_path, sizeof(names_path), "%s/obj.names", model_path);
-        if (access(names_path, F_OK) != 0) {
-            snprintf(names_path, sizeof(names_path), "%s/labels.txt", model_path);
-            if (access(names_path, F_OK) != 0) {
-                names_path[0] = '\0';  /* No labels file found */
-            }
-        }
-    } else {
-        fprintf(stderr, "darknet_load: Path must be a directory containing .cfg and .weights\n");
+    if (!is_dir(model_path)) {
+        cira_set_error(ctx, "Path must be a directory containing .cfg and .weights: %s", model_path);
         return CIRA_ERROR_INPUT;
+    }
+
+    /* Find .cfg file */
+    if (!find_file_ext(model_path, ".cfg", cfg_path, sizeof(cfg_path))) {
+        cira_set_error(ctx, "No .cfg file found in %s", model_path);
+        return CIRA_ERROR_FILE;
+    }
+
+    /* Find .weights file */
+    if (!find_file_ext(model_path, ".weights", weights_path, sizeof(weights_path))) {
+        cira_set_error(ctx, "No .weights file found in %s", model_path);
+        return CIRA_ERROR_FILE;
     }
 
     /* Allocate model structure */
     darknet_model_t* model = (darknet_model_t*)calloc(1, sizeof(darknet_model_t));
     if (!model) {
+        cira_set_error(ctx, "Failed to allocate model structure");
         return CIRA_ERROR_MEMORY;
     }
 
@@ -174,7 +157,7 @@ int darknet_load(cira_ctx* ctx, const char* model_path) {
 
     model->net = load_network(cfg_path, weights_path, 0);
     if (!model->net) {
-        fprintf(stderr, "darknet_load: Failed to load network\n");
+        cira_set_error(ctx, "Failed to load Darknet network");
         free(model);
         return CIRA_ERROR_MODEL;
     }
@@ -185,22 +168,19 @@ int darknet_load(cira_ctx* ctx, const char* model_path) {
     /* Get network input dimensions */
     model->input_w = network_width(model->net);
     model->input_h = network_height(model->net);
+    model->num_classes = ctx->num_labels;  /* Use labels loaded by cira_load() */
+
+    /* Update context with model dimensions */
+    ctx->input_w = model->input_w;
+    ctx->input_h = model->input_h;
 
     fprintf(stderr, "  Input size: %dx%d\n", model->input_w, model->input_h);
+    fprintf(stderr, "  Classes: %d\n", model->num_classes);
 
     /* Store model handle in context */
-    /* Note: This requires ctx to be a pointer we can cast */
-    /* We'll store it in model_handle field */
-    /* Access via external linkage - ctx structure must be visible */
-
-    /* For now, we'll use a simple global approach */
-    /* In production, this should be properly integrated with ctx */
+    ctx->model_handle = model;
 
     fprintf(stderr, "Darknet model loaded successfully\n");
-
-    /* Store model in context - requires access to ctx internals */
-    /* This will be handled by the caller setting ctx->model_handle */
-
     return CIRA_OK;
 }
 
@@ -208,77 +188,105 @@ int darknet_load(cira_ctx* ctx, const char* model_path) {
  * Unload Darknet model and free resources.
  */
 void darknet_unload(cira_ctx* ctx) {
-    /* Get model handle from context and free */
-    /* This requires access to ctx->model_handle */
-    (void)ctx;  /* Suppress unused warning for now */
+    if (!ctx || !ctx->model_handle) return;
+
+    darknet_model_t* model = (darknet_model_t*)ctx->model_handle;
+
+    if (model->net) {
+        free_network(model->net);
+    }
+
+    free(model);
+    ctx->model_handle = NULL;
+
+    fprintf(stderr, "Darknet model unloaded\n");
 }
 
 /**
  * Run YOLO inference on an image.
  *
  * @param ctx Context with loaded Darknet model
- * @param data RGB image data (packed, row-major)
+ * @param data RGB image data (packed HWC, row-major)
  * @param w Image width
  * @param h Image height
  * @param channels Number of channels (must be 3)
  * @return CIRA_OK on success
  */
 int darknet_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels) {
-    (void)ctx;
-    (void)data;
-    (void)w;
-    (void)h;
-    (void)channels;
+    if (!ctx || !ctx->model_handle || !data) {
+        return CIRA_ERROR_INPUT;
+    }
 
-    /* TODO: Implement full prediction pipeline */
-    /* This requires proper access to ctx internals */
+    if (channels != 3) {
+        cira_set_error(ctx, "Only 3-channel images supported");
+        return CIRA_ERROR_INPUT;
+    }
 
-    /*
-     * Implementation outline:
-     *
-     * 1. Get model from ctx->model_handle
-     * darknet_model_t* model = (darknet_model_t*)ctx->model_handle;
-     *
-     * 2. Convert input image to Darknet format
-     * image im = make_image_from_bytes(data, w, h, channels);
-     *
-     * 3. Resize to network input size
-     * image resized = resize_image(im, model->input_w, model->input_h);
-     *
-     * 4. Run inference
-     * network_predict(model->net, resized.data);
-     *
-     * 5. Get detections
-     * int nboxes = 0;
-     * float thresh = ctx->confidence_threshold;
-     * float nms = ctx->nms_threshold;
-     * detection* dets = get_network_boxes(model->net, w, h, thresh, 0.5, 0, 1, &nboxes, 0);
-     *
-     * 6. Apply NMS
-     * do_nms_sort(dets, nboxes, model->num_classes, nms);
-     *
-     * 7. Convert to cira_detection_t and store in ctx->detections
-     * ctx->num_detections = 0;
-     * for (int i = 0; i < nboxes; i++) {
-     *     for (int j = 0; j < model->num_classes; j++) {
-     *         if (dets[i].prob[j] > thresh) {
-     *             cira_detection_t* det = &ctx->detections[ctx->num_detections++];
-     *             det->x = dets[i].x - dets[i].w/2;
-     *             det->y = dets[i].y - dets[i].h/2;
-     *             det->w = dets[i].w;
-     *             det->h = dets[i].h;
-     *             det->confidence = dets[i].prob[j];
-     *             det->label_id = j;
-     *         }
-     *     }
-     * }
-     *
-     * 8. Cleanup
-     * free_detections(dets, nboxes);
-     * free_image(im);
-     * free_image(resized);
-     */
+    darknet_model_t* model = (darknet_model_t*)ctx->model_handle;
 
+    /* Clear previous detections */
+    cira_clear_detections(ctx);
+
+    /* Convert input image to Darknet format (CHW, float, 0-1) */
+    image im = make_image_from_bytes(data, w, h, channels);
+
+    /* Resize to network input size */
+    image resized = resize_image(im, model->input_w, model->input_h);
+
+    /* Run inference */
+    network_predict(model->net, resized.data);
+
+    /* Get detections */
+    int nboxes = 0;
+    float thresh = ctx->confidence_threshold;
+    float nms_thresh = ctx->nms_threshold;
+
+    /* Get detection boxes (relative coordinates) */
+    detection* dets = get_network_boxes(model->net, w, h, thresh, 0.5f, NULL, 1, &nboxes, 0);
+
+    /* Apply Non-Maximum Suppression */
+    if (nms_thresh > 0 && model->num_classes > 0) {
+        do_nms_sort(dets, nboxes, model->num_classes, nms_thresh);
+    }
+
+    /* Convert detections to cira format */
+    for (int i = 0; i < nboxes; i++) {
+        /* Check each class */
+        for (int j = 0; j < model->num_classes; j++) {
+            if (dets[i].prob[j] > thresh) {
+                /* Darknet uses center coordinates, convert to top-left */
+                float det_x = dets[i].x - dets[i].w / 2.0f;
+                float det_y = dets[i].y - dets[i].h / 2.0f;
+                float det_w = dets[i].w;
+                float det_h = dets[i].h;
+
+                /* Clamp to [0, 1] */
+                if (det_x < 0) det_x = 0;
+                if (det_y < 0) det_y = 0;
+                if (det_x + det_w > 1) det_w = 1 - det_x;
+                if (det_y + det_h > 1) det_h = 1 - det_y;
+
+                /* Add detection */
+                if (!cira_add_detection(ctx, det_x, det_y, det_w, det_h,
+                                        dets[i].prob[j], j)) {
+                    /* Detection array full */
+                    break;
+                }
+            }
+        }
+
+        /* Check if detection array is full */
+        if (ctx->num_detections >= CIRA_MAX_DETECTIONS) {
+            break;
+        }
+    }
+
+    /* Cleanup */
+    free_detections(dets, nboxes);
+    free_image(resized);
+    free_image(im);
+
+    fprintf(stderr, "Darknet inference: %d detections\n", ctx->num_detections);
     return CIRA_OK;
 }
 
@@ -286,8 +294,8 @@ int darknet_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channe
 
 /* Stubs when Darknet is not enabled */
 int darknet_load(cira_ctx* ctx, const char* model_path) {
-    (void)ctx;
     (void)model_path;
+    cira_set_error(ctx, "Darknet support not enabled in this build");
     return CIRA_ERROR_MODEL;
 }
 
@@ -296,11 +304,11 @@ void darknet_unload(cira_ctx* ctx) {
 }
 
 int darknet_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels) {
-    (void)ctx;
     (void)data;
     (void)w;
     (void)h;
     (void)channels;
+    cira_set_error(ctx, "Darknet support not enabled in this build");
     return CIRA_ERROR_MODEL;
 }
 
