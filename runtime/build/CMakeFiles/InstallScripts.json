@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/CiRA Claw/cira-edge/runtime/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

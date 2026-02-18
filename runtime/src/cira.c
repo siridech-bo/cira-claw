@@ -181,8 +181,10 @@ static int load_labels(cira_ctx* ctx, const char* path) {
         }
 
         if (len > 0) {
-            strncpy(ctx->labels[ctx->num_labels], line, CIRA_MAX_LABEL_LEN - 1);
-            ctx->labels[ctx->num_labels][CIRA_MAX_LABEL_LEN - 1] = '\0';
+            /* Use memcpy since we already know the length (avoids strncpy truncation warning) */
+            size_t copy_len = len < CIRA_MAX_LABEL_LEN - 1 ? len : CIRA_MAX_LABEL_LEN - 1;
+            memcpy(ctx->labels[ctx->num_labels], line, copy_len);
+            ctx->labels[ctx->num_labels][copy_len] = '\0';
             ctx->num_labels++;
         }
     }
