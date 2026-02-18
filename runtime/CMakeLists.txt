@@ -39,7 +39,22 @@ if(CIRA_ENABLE_TENSORRT)
 endif()
 
 if(CIRA_ENABLE_NCNN)
-    find_package(ncnn REQUIRED)
+    find_package(ncnn QUIET)
+    if(NOT ncnn_FOUND)
+        # Try pkg-config as fallback
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(NCNN_PKG ncnn)
+        endif()
+        if(NOT NCNN_PKG_FOUND)
+            message(FATAL_ERROR
+                "NCNN not found. Install NCNN or disable with -DCIRA_ENABLE_NCNN=OFF\n"
+                "  Windows: vcpkg install ncnn:x64-windows\n"
+                "  Linux:   sudo apt install libncnn-dev  OR  build from source\n"
+                "  macOS:   brew install ncnn\n"
+                "  Or set ncnn_DIR to your NCNN install path")
+        endif()
+    endif()
 
     if(CIRA_ENABLE_VULKAN)
         find_package(Vulkan QUIET)
@@ -107,7 +122,12 @@ if(CIRA_ENABLE_DARKNET)
 endif()
 
 if(CIRA_ENABLE_NCNN)
-    target_link_libraries(cira PRIVATE ncnn)
+    if(ncnn_FOUND)
+        target_link_libraries(cira PRIVATE ncnn)
+    elseif(NCNN_PKG_FOUND)
+        target_include_directories(cira PRIVATE ${NCNN_PKG_INCLUDE_DIRS})
+        target_link_libraries(cira PRIVATE ${NCNN_PKG_LIBRARIES})
+    endif()
     target_compile_definitions(cira PRIVATE CIRA_NCNN_ENABLED)
 
     if(CIRA_ENABLE_VULKAN AND Vulkan_FOUND)
