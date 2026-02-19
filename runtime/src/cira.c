@@ -17,6 +17,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <time.h>
 
 /* Version string */
 #define CIRA_VERSION_STRING "1.0.0"
@@ -76,6 +77,12 @@ int cira_add_detection(cira_ctx* ctx, float x, float y, float w, float h,
     det->confidence = confidence;
     det->label_id = label_id;
     ctx->num_detections++;
+
+    /* Update cumulative statistics */
+    ctx->total_detections++;
+    if (label_id >= 0 && label_id < CIRA_MAX_LABELS) {
+        ctx->detections_by_label[label_id]++;
+    }
 
     return 1;
 }
@@ -293,6 +300,12 @@ cira_ctx* cira_create(void) {
     /* Initialize empty result JSON */
     strcpy(ctx->result_json, "{\"detections\":[],\"count\":0}");
 
+    /* Initialize cumulative statistics */
+    ctx->total_detections = 0;
+    ctx->total_frames = 0;
+    ctx->start_time = time(NULL);
+    memset(ctx->detections_by_label, 0, sizeof(ctx->detections_by_label));
+
     return ctx;
 }
 
@@ -485,6 +498,7 @@ int cira_predict_image(cira_ctx* ctx, const uint8_t* data, int w, int h, int cha
 
     if (result == CIRA_OK) {
         build_result_json(ctx, w, h);
+        ctx->total_frames++;
     }
 
     pthread_mutex_unlock(&ctx->result_mutex);

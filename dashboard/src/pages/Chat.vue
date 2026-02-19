@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from 'vue';
+import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 
 interface Message {
   id: string;
@@ -9,10 +9,97 @@ interface Message {
   images?: string[];
 }
 
+interface ChatResponse {
+  type: 'response' | 'error' | 'pong' | 'typing';
+  content?: string;
+  images?: string[];
+}
+
 const messages = ref<Message[]>([]);
 const inputText = ref('');
 const sending = ref(false);
+const connected = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
+
+let ws: WebSocket | null = null;
+let reconnectTimer: number | null = null;
+
+function getWebSocketUrl(): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/chat`;
+}
+
+function connect() {
+  if (ws?.readyState === WebSocket.OPEN) return;
+
+  const url = getWebSocketUrl();
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    connected.value = true;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  ws.onclose = () => {
+    connected.value = false;
+    sending.value = false;
+    // Reconnect after 3 seconds
+    reconnectTimer = window.setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => {
+    // Error will trigger onclose
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const response = JSON.parse(event.data) as ChatResponse;
+      handleResponse(response);
+    } catch {
+      console.error('Failed to parse WebSocket message');
+    }
+  };
+}
+
+function handleResponse(response: ChatResponse) {
+  switch (response.type) {
+    case 'response':
+      sending.value = false;
+      if (response.content) {
+        messages.value.push({
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: response.content,
+          timestamp: new Date(),
+          images: response.images,
+        });
+        scrollToBottom();
+      }
+      break;
+
+    case 'error':
+      sending.value = false;
+      messages.value.push({
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: response.content || 'An error occurred.',
+        timestamp: new Date(),
+      });
+      scrollToBottom();
+      break;
+
+    case 'typing':
+      sending.value = true;
+      break;
+
+    case 'pong':
+      // Heartbeat response, ignore
+      break;
+  }
+}
 
 onMounted(() => {
   // Add welcome message
@@ -28,6 +115,19 @@ Try asking me:
 - "Deploy scratch_v4 to line 1"`,
     timestamp: new Date(),
   });
+
+  // Connect to WebSocket
+  connect();
+});
+
+onUnmounted(() => {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
 });
 
 async function sendMessage() {
@@ -46,38 +146,22 @@ async function sendMessage() {
 
   await scrollToBottom();
 
-  // Send to backend (placeholder - will be implemented with agent)
-  sending.value = true;
-
-  try {
-    // For now, simulate a response since the agent isn't implemented yet
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    const assistantMessage: Message = {
-      id: `assistant-${Date.now()}`,
-      role: 'assistant',
-      content: `I received your message: "${text}"
-
-The AI agent integration is not yet implemented. Once configured, I'll be able to:
-- Query device status
-- Check inference results
-- Take camera snapshots
-- Deploy models
-- And much more!
-
-Please configure your Claude API key in ~/.cira/credentials/claude.json to enable the agent.`,
-      timestamp: new Date(),
-    };
-    messages.value.push(assistantMessage);
-  } catch (error) {
+  // Send via WebSocket
+  if (ws?.readyState === WebSocket.OPEN) {
+    sending.value = true;
+    ws.send(JSON.stringify({
+      type: 'message',
+      content: text,
+    }));
+  } else {
+    // Not connected, show error
     messages.value.push({
       id: `error-${Date.now()}`,
       role: 'assistant',
-      content: `Error: Failed to process your request. Please try again.`,
+      content: 'Not connected to server. Attempting to reconnect...',
       timestamp: new Date(),
     });
-  } finally {
-    sending.value = false;
+    connect();
     await scrollToBottom();
   }
 }
@@ -105,6 +189,10 @@ function handleKeydown(event: KeyboardEvent) {
   <div class="chat-page">
     <header class="page-header">
       <h2>Chat with CiRA Agent</h2>
+      <div class="connection-status" :class="{ connected }">
+        <span class="status-dot"></span>
+        {{ connected ? 'Connected' : 'Disconnected' }}
+      </div>
     </header>
 
     <div class="chat-container">
@@ -151,7 +239,7 @@ function handleKeydown(event: KeyboardEvent) {
           rows="1"
           :disabled="sending"
         ></textarea>
-        <button @click="sendMessage" :disabled="!inputText.trim() || sending">
+        <button @click="sendMessage" :disabled="!inputText.trim() || sending || !connected">
           {{ sending ? '...' : 'Send' }}
         </button>
       </div>
@@ -170,11 +258,37 @@ function handleKeydown(event: KeyboardEvent) {
 
 .page-header {
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .page-header h2 {
   font-size: 1.5rem;
   font-weight: 600;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.875rem;
+  color: #94a3b8;
+}
+
+.connection-status.connected {
+  color: #22c55e;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.connection-status.connected .status-dot {
+  background: #22c55e;
 }
 
 .chat-container {

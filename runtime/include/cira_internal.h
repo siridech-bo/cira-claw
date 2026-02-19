@@ -12,6 +12,7 @@
 
 #include "cira.h"
 #include <pthread.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,6 +92,12 @@ struct cira_ctx {
     int frame_h;
     int frame_size;
     pthread_mutex_t frame_mutex;
+
+    /* Cumulative statistics (for /api/stats endpoint) */
+    uint64_t total_detections;                      /* Total detections since startup */
+    uint64_t detections_by_label[CIRA_MAX_LABELS];  /* Detections per label */
+    uint64_t total_frames;                          /* Total frames processed */
+    time_t start_time;                              /* Startup timestamp */
 };
 
 /* Internal helper functions (defined in cira.c) */

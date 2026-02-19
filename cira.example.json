@@ -35,6 +35,11 @@
     "webchat": {
       "enabled": true,
       "path": "/chat"
+    },
+    "modbus": {
+      "enabled": true,
+      "port": 502,
+      "host": "0.0.0.0"
     }
   },
 

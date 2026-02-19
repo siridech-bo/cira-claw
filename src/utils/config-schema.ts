@@ -46,12 +46,20 @@ export const WebChatChannelConfigSchema = z.object({
   path: z.string().default('/chat'),
 });
 
+// MODBUS server configuration
+export const ModbusConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  port: z.number().int().min(1).max(65535).default(502),
+  host: z.string().default('0.0.0.0'),
+});
+
 // Channels configuration
 export const ChannelsConfigSchema = z.object({
   line: LineChannelConfigSchema.default({}),
   telegram: TelegramChannelConfigSchema.default({}),
   mqtt: MqttChannelConfigSchema.default({}),
   webchat: WebChatChannelConfigSchema.default({}),
+  modbus: ModbusConfigSchema.default({}),
 });
 
 // Discovery configuration

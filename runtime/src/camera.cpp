@@ -141,7 +141,10 @@ static void* camera_thread_func_impl(void* arg) {
                     break;
             }
 
-            if (result != CIRA_OK && result != CIRA_ERROR) {
+            if (result == CIRA_OK) {
+                /* Increment total frames for stats */
+                ctx->total_frames++;
+            } else if (result != CIRA_ERROR) {
                 /* Log inference errors occasionally */
                 static int err_count = 0;
                 if (++err_count % 100 == 1) {

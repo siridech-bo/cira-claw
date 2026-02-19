@@ -261,6 +261,70 @@ static int handle_results(struct MHD_Connection* conn, cira_ctx* ctx) {
 }
 
 /**
+ * Handle /api/stats endpoint - cumulative statistics since startup.
+ */
+static int handle_stats(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char response[MAX_RESPONSE_SIZE];
+    char timestamp[32];
+    get_timestamp(timestamp, sizeof(timestamp));
+
+    /* Calculate uptime in seconds */
+    time_t now = time(NULL);
+    long uptime_sec = (long)(now - ctx->start_time);
+
+    /* Build by_label JSON object */
+    char by_label[8192] = "{";
+    char* p = by_label + 1;
+    char* end = by_label + sizeof(by_label) - 2;
+    int first = 1;
+
+    for (int i = 0; i < ctx->num_labels && p < end - 128; i++) {
+        if (ctx->detections_by_label[i] > 0) {
+            if (!first) {
+                *p++ = ',';
+            }
+            p += snprintf(p, end - p, "\"%s\":%llu",
+                         ctx->labels[i],
+                         (unsigned long long)ctx->detections_by_label[i]);
+            first = 0;
+        }
+    }
+    *p++ = '}';
+    *p = '\0';
+
+    /* Build full response */
+    snprintf(response, sizeof(response),
+        "{"
+        "\"total_detections\":%llu,"
+        "\"total_frames\":%llu,"
+        "\"by_label\":%s,"
+        "\"fps\":%.1f,"
+        "\"uptime_sec\":%ld,"
+        "\"timestamp\":\"%s\","
+        "\"model_loaded\":%s"
+        "}",
+        (unsigned long long)ctx->total_detections,
+        (unsigned long long)ctx->total_frames,
+        by_label,
+        cira_get_fps(ctx),
+        uptime_sec,
+        timestamp,
+        ctx->format != CIRA_FORMAT_UNKNOWN ? "true" : "false"
+    );
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
  * Handle /snapshot endpoint.
  */
 static int handle_snapshot(struct MHD_Connection* conn, cira_ctx* ctx) {
@@ -411,8 +475,11 @@ static enum MHD_Result request_handler(
     if (strcmp(url, "/health") == 0) {
         return handle_health(conn, ctx);
     }
-    if (strcmp(url, "/api/results") == 0 || strcmp(url, "/api/stats") == 0) {
+    if (strcmp(url, "/api/results") == 0) {
         return handle_results(conn, ctx);
+    }
+    if (strcmp(url, "/api/stats") == 0) {
+        return handle_stats(conn, ctx);
     }
     if (strcmp(url, "/snapshot") == 0) {
         return handle_snapshot(conn, ctx);
@@ -468,6 +535,7 @@ int server_start(cira_ctx* ctx, int port) {
     fprintf(stderr, "  Snapshot:  http://localhost:%d/snapshot\n", port);
     fprintf(stderr, "  Stream:    http://localhost:%d/stream/annotated\n", port);
     fprintf(stderr, "  Results:   http://localhost:%d/api/results\n", port);
+    fprintf(stderr, "  Stats:     http://localhost:%d/api/stats\n", port);
 
     return CIRA_OK;
 }

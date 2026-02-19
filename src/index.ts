@@ -9,6 +9,8 @@ import { getNodeManager, NodeManager } from './nodes/manager.js';
 import { getAgent, CiraAgent } from './agent/agent.js';
 import { createLineChannel, LineChannel } from './channels/line.js';
 import { createMqttChannel, MqttChannel } from './channels/mqtt.js';
+import { createStatsCollector, StatsCollector } from './services/stats-collector.js';
+import { createModbusServer, ModbusServer } from './services/modbus-server.js';
 import { createLogger, logger as rootLogger } from './utils/logger.js';
 import { CiraConfig } from './utils/config-schema.js';
 
@@ -22,6 +24,8 @@ let wsHandler: WebSocketHandler;
 let agent: CiraAgent;
 let lineChannel: LineChannel | null = null;
 let mqttChannel: MqttChannel | null = null;
+let statsCollector: StatsCollector | null = null;
+let modbusServer: ModbusServer | null = null;
 let config: CiraConfig;
 let configPath: string | undefined;
 let isShuttingDown = false;
@@ -45,6 +49,18 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }, 30000); // 30 second timeout
 
   try {
+    // Stop stats collector
+    if (statsCollector) {
+      logger.debug('Stopping stats collector...');
+      statsCollector.stop();
+    }
+
+    // Stop MODBUS server
+    if (modbusServer) {
+      logger.debug('Stopping MODBUS server...');
+      await modbusServer.stop();
+    }
+
     // Stop accepting new connections
     logger.debug('Stopping health checks...');
     nodeManager?.stopHealthChecks();
@@ -252,6 +268,37 @@ async function main(): Promise<void> {
       }
     }
 
+    // Initialize stats collector for data accumulation and MQTT publishing
+    const statsDataDir = path.join(configLoader.workspacePath, 'stats');
+    statsCollector = createStatsCollector(
+      nodeManager,
+      mqttChannel,
+      config.alerts,
+      statsDataDir
+    );
+    statsCollector.start(10000); // Poll every 10 seconds
+    logger.info('Stats collector started');
+
+    // Initialize MODBUS server if enabled
+    if (config.channels.modbus.enabled) {
+      modbusServer = createModbusServer(
+        {
+          port: config.channels.modbus.port,
+          host: config.channels.modbus.host,
+        },
+        nodeManager,
+        statsCollector
+      );
+
+      try {
+        await modbusServer.start();
+        logger.info(`MODBUS server started on port ${config.channels.modbus.port}`);
+      } catch (error) {
+        logger.warn(`Failed to start MODBUS server: ${error}`);
+        modbusServer = null;
+      }
+    }
+
     // Start health checks
     nodeManager.startHealthChecks(30000); // Every 30 seconds
 
@@ -270,6 +317,9 @@ async function main(): Promise<void> {
     logger.info(`  WebSocket: ws://${host}:${port}/ws`);
     logger.info(`  Chat: ws://${host}:${port}/chat`);
     logger.info(`  Health: http://${host}:${port}/health`);
+    if (modbusServer) {
+      logger.info(`  MODBUS: tcp://${host}:${config.channels.modbus.port}`);
+    }
 
     // Log ready status for systemd
     if (process.env.NODE_ENV === 'production') {
