@@ -86,11 +86,26 @@ CMakeFiles/cira.dir/src/cira.c.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/cira.dir/src/cira.c.s"
 	C:\msys64\mingw64\bin\cc.exe $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S "D:\CiRA Claw\cira-edge\runtime\src\cira.c" -o CMakeFiles\cira.dir\src\cira.c.s
 
+CMakeFiles/cira.dir/src/onnx_loader.c.obj: CMakeFiles/cira.dir/flags.make
+CMakeFiles/cira.dir/src/onnx_loader.c.obj: CMakeFiles/cira.dir/includes_C.rsp
+CMakeFiles/cira.dir/src/onnx_loader.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/onnx_loader.c
+CMakeFiles/cira.dir/src/onnx_loader.c.obj: CMakeFiles/cira.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_2) "Building C object CMakeFiles/cira.dir/src/onnx_loader.c.obj"
+	C:\msys64\mingw64\bin\cc.exe $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/cira.dir/src/onnx_loader.c.obj -MF CMakeFiles\cira.dir\src\onnx_loader.c.obj.d -o CMakeFiles\cira.dir\src\onnx_loader.c.obj -c "D:\CiRA Claw\cira-edge\runtime\src\onnx_loader.c"
+
+CMakeFiles/cira.dir/src/onnx_loader.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/cira.dir/src/onnx_loader.c.i"
+	C:\msys64\mingw64\bin\cc.exe $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E "D:\CiRA Claw\cira-edge\runtime\src\onnx_loader.c" > CMakeFiles\cira.dir\src\onnx_loader.c.i
+
+CMakeFiles/cira.dir/src/onnx_loader.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/cira.dir/src/onnx_loader.c.s"
+	C:\msys64\mingw64\bin\cc.exe $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S "D:\CiRA Claw\cira-edge\runtime\src\onnx_loader.c" -o CMakeFiles\cira.dir\src\onnx_loader.c.s
+
 CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj: CMakeFiles/cira.dir/flags.make
 CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj: CMakeFiles/cira.dir/includes_CXX.rsp
 CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src/ncnn_loader.cpp
 CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj: CMakeFiles/cira.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj"
 	C:\msys64\mingw64\bin\c++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj -MF CMakeFiles\cira.dir\src\ncnn_loader.cpp.obj.d -o CMakeFiles\cira.dir\src\ncnn_loader.cpp.obj -c "D:\CiRA Claw\cira-edge\runtime\src\ncnn_loader.cpp"
 
 CMakeFiles/cira.dir/src/ncnn_loader.cpp.i: cmake_force
@@ -105,7 +120,7 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: CMakeFiles/cira.dir/flags.make
 CMakeFiles/cira.dir/src/stream_server.c.obj: CMakeFiles/cira.dir/includes_C.rsp
 CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/stream_server.c
 CMakeFiles/cira.dir/src/stream_server.c.obj: CMakeFiles/cira.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_3) "Building C object CMakeFiles/cira.dir/src/stream_server.c.obj"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_4) "Building C object CMakeFiles/cira.dir/src/stream_server.c.obj"
 	C:\msys64\mingw64\bin\cc.exe $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/cira.dir/src/stream_server.c.obj -MF CMakeFiles\cira.dir\src\stream_server.c.obj.d -o CMakeFiles\cira.dir\src\stream_server.c.obj -c "D:\CiRA Claw\cira-edge\runtime\src\stream_server.c"
 
 CMakeFiles/cira.dir/src/stream_server.c.i: cmake_force
@@ -120,7 +135,7 @@ CMakeFiles/cira.dir/src/camera.cpp.obj: CMakeFiles/cira.dir/flags.make
 CMakeFiles/cira.dir/src/camera.cpp.obj: CMakeFiles/cira.dir/includes_CXX.rsp
 CMakeFiles/cira.dir/src/camera.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src/camera.cpp
 CMakeFiles/cira.dir/src/camera.cpp.obj: CMakeFiles/cira.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/cira.dir/src/camera.cpp.obj"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/cira.dir/src/camera.cpp.obj"
 	C:\msys64\mingw64\bin\c++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/cira.dir/src/camera.cpp.obj -MF CMakeFiles\cira.dir\src\camera.cpp.obj.d -o CMakeFiles\cira.dir\src\camera.cpp.obj -c "D:\CiRA Claw\cira-edge\runtime\src\camera.cpp"
 
 CMakeFiles/cira.dir/src/camera.cpp.i: cmake_force
@@ -135,7 +150,7 @@ CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj: CMakeFiles/cira.dir/flags.make
 CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj: CMakeFiles/cira.dir/includes_CXX.rsp
 CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src/jpeg_encoder.cpp
 CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj: CMakeFiles/cira.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj"
 	C:\msys64\mingw64\bin\c++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj -MF CMakeFiles\cira.dir\src\jpeg_encoder.cpp.obj.d -o CMakeFiles\cira.dir\src\jpeg_encoder.cpp.obj -c "D:\CiRA Claw\cira-edge\runtime\src\jpeg_encoder.cpp"
 
 CMakeFiles/cira.dir/src/jpeg_encoder.cpp.i: cmake_force
@@ -150,7 +165,7 @@ CMakeFiles/cira.dir/src/annotator.c.obj: CMakeFiles/cira.dir/flags.make
 CMakeFiles/cira.dir/src/annotator.c.obj: CMakeFiles/cira.dir/includes_C.rsp
 CMakeFiles/cira.dir/src/annotator.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/annotator.c
 CMakeFiles/cira.dir/src/annotator.c.obj: CMakeFiles/cira.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_6) "Building C object CMakeFiles/cira.dir/src/annotator.c.obj"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_7) "Building C object CMakeFiles/cira.dir/src/annotator.c.obj"
 	C:\msys64\mingw64\bin\cc.exe $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/cira.dir/src/annotator.c.obj -MF CMakeFiles\cira.dir\src\annotator.c.obj.d -o CMakeFiles\cira.dir\src\annotator.c.obj -c "D:\CiRA Claw\cira-edge\runtime\src\annotator.c"
 
 CMakeFiles/cira.dir/src/annotator.c.i: cmake_force
@@ -164,6 +179,7 @@ CMakeFiles/cira.dir/src/annotator.c.s: cmake_force
 # Object files for target cira
 cira_OBJECTS = \
 "CMakeFiles/cira.dir/src/cira.c.obj" \
+"CMakeFiles/cira.dir/src/onnx_loader.c.obj" \
 "CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj" \
 "CMakeFiles/cira.dir/src/stream_server.c.obj" \
 "CMakeFiles/cira.dir/src/camera.cpp.obj" \
@@ -174,12 +190,14 @@ cira_OBJECTS = \
 cira_EXTERNAL_OBJECTS =
 
 libcira.dll: CMakeFiles/cira.dir/src/cira.c.obj
+libcira.dll: CMakeFiles/cira.dir/src/onnx_loader.c.obj
 libcira.dll: CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj
 libcira.dll: CMakeFiles/cira.dir/src/stream_server.c.obj
 libcira.dll: CMakeFiles/cira.dir/src/camera.cpp.obj
 libcira.dll: CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj
 libcira.dll: CMakeFiles/cira.dir/src/annotator.c.obj
 libcira.dll: CMakeFiles/cira.dir/build.make
+libcira.dll: D:/onnxruntime-win-x64-1.17.0/lib/onnxruntime.lib
 libcira.dll: C:/msys64/mingw64/lib/libncnn.a
 libcira.dll: C:/msys64/mingw64/lib/libmicrohttpd.dll.a
 libcira.dll: C:/msys64/mingw64/lib/libopencv_videoio.dll.a
@@ -191,7 +209,7 @@ libcira.dll: C:/msys64/mingw64/lib/libopencv_core.dll.a
 libcira.dll: CMakeFiles/cira.dir/linkLibs.rsp
 libcira.dll: CMakeFiles/cira.dir/objects1.rsp
 libcira.dll: CMakeFiles/cira.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX shared library libcira.dll"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir="D:\CiRA Claw\cira-edge\runtime\build\CMakeFiles" --progress-num=$(CMAKE_PROGRESS_8) "Linking CXX shared library libcira.dll"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles\cira.dir\link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

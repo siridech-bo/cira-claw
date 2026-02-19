@@ -9,6 +9,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj.d"
   "CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj"
   "CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj.d"
+  "CMakeFiles/cira.dir/src/onnx_loader.c.obj"
+  "CMakeFiles/cira.dir/src/onnx_loader.c.obj.d"
   "CMakeFiles/cira.dir/src/stream_server.c.obj"
   "CMakeFiles/cira.dir/src/stream_server.c.obj.d"
   "libcira.dll"

@@ -6,5 +6,5 @@ C_DEFINES =
 
 C_INCLUDES = @CMakeFiles/test_stream.dir/includes_C.rsp
 
-C_FLAGS = -O3 -DNDEBUG -std=gnu11 -Wall -Wextra -Werror -pedantic
+C_FLAGS = -std=gnu11 -Wall -Wextra -Werror -pedantic
 

@@ -199,13 +199,90 @@ static float get_temperature(void) {
     return temp / 1000.0f;  /* Convert from millidegrees */
 }
 
+/* Helper: Get CPU usage percentage */
+static float get_cpu_usage(void) {
+#ifdef _WIN32
+    return 0;  /* TODO: Implement for Windows */
+#else
+    static long prev_total = 0, prev_idle = 0;
+    FILE* f = fopen("/proc/stat", "r");
+    if (!f) return 0;
+
+    char cpu[16];
+    long user, nice, system, idle, iowait, irq, softirq;
+    if (fscanf(f, "%s %ld %ld %ld %ld %ld %ld %ld",
+               cpu, &user, &nice, &system, &idle, &iowait, &irq, &softirq) != 8) {
+        fclose(f);
+        return 0;
+    }
+    fclose(f);
+
+    long total = user + nice + system + idle + iowait + irq + softirq;
+    long diff_total = total - prev_total;
+    long diff_idle = idle - prev_idle;
+
+    float usage = diff_total > 0 ? 100.0f * (1.0f - (float)diff_idle / diff_total) : 0;
+
+    prev_total = total;
+    prev_idle = idle;
+
+    return usage;
+#endif
+}
+
+/* Helper: Get memory usage percentage */
+static float get_memory_usage(void) {
+#ifdef _WIN32
+    return 0;  /* TODO: Implement for Windows */
+#else
+    FILE* f = fopen("/proc/meminfo", "r");
+    if (!f) return 0;
+
+    long mem_total = 0, mem_available = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "MemTotal:", 9) == 0) {
+            sscanf(line + 9, "%ld", &mem_total);
+        } else if (strncmp(line, "MemAvailable:", 13) == 0) {
+            sscanf(line + 13, "%ld", &mem_available);
+        }
+    }
+    fclose(f);
+
+    if (mem_total > 0) {
+        return 100.0f * (1.0f - (float)mem_available / mem_total);
+    }
+    return 0;
+#endif
+}
+
 /**
  * Handle /health endpoint.
+ * Returns fields compatible with CiRA Edge dashboard.
  */
 static int handle_health(struct MHD_Connection* conn, cira_ctx* ctx) {
     char response[MAX_RESPONSE_SIZE];
     char timestamp[32];
     get_timestamp(timestamp, sizeof(timestamp));
+
+    /* Calculate defects per hour */
+    long uptime = get_uptime();
+    float defects_per_hour = 0;
+    if (uptime > 0) {
+        defects_per_hour = (float)ctx->total_detections * 3600.0f / uptime;
+    }
+
+    /* Get model name - use format name or "unknown" */
+    const char* model_name = "unknown";
+    if (ctx->format == CIRA_FORMAT_ONNX) {
+        model_name = "ONNX";
+    } else if (ctx->format == CIRA_FORMAT_DARKNET) {
+        model_name = "Darknet";
+    } else if (ctx->format == CIRA_FORMAT_NCNN) {
+        model_name = "NCNN";
+    } else if (ctx->format == CIRA_FORMAT_TENSORRT) {
+        model_name = "TensorRT";
+    }
 
     snprintf(response, sizeof(response),
         "{"
@@ -215,18 +292,28 @@ static int handle_health(struct MHD_Connection* conn, cira_ctx* ctx) {
         "\"timestamp\":\"%s\","
         "\"fps\":%.1f,"
         "\"temperature\":%.1f,"
+        "\"cpu_usage\":%.1f,"
+        "\"memory_usage\":%.1f,"
         "\"model_loaded\":%s,"
+        "\"model_name\":\"%s\","
         "\"camera_running\":%s,"
-        "\"detections\":%d"
+        "\"detections\":%d,"
+        "\"defects_total\":%llu,"
+        "\"defects_per_hour\":%.1f"
         "}",
         cira_version(),
-        get_uptime(),
+        uptime,
         timestamp,
         cira_get_fps(ctx),
         get_temperature(),
+        get_cpu_usage(),
+        get_memory_usage(),
         cira_status(ctx) == CIRA_STATUS_READY ? "true" : "false",
-        "false",  /* TODO: Check ctx->camera_running */
-        cira_result_count(ctx)
+        model_name,
+        g_server && g_server->ctx ? "true" : "false",
+        cira_result_count(ctx),
+        (unsigned long long)ctx->total_detections,
+        defects_per_hour
     );
 
     struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
@@ -429,6 +516,87 @@ static int handle_stream(struct MHD_Connection* conn, cira_ctx* ctx, int annotat
     return ret;
 }
 
+/* HTML template for web UI - stored as static buffer */
+static char g_html_template[8192];
+static int g_html_initialized = 0;
+
+static void init_html_template(void) {
+    if (g_html_initialized) return;
+    snprintf(g_html_template, sizeof(g_html_template),
+        "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>CiRA Runtime</title><style>"
+        "*{box-sizing:border-box;margin:0;padding:0}"
+        "body{font-family:system-ui;background:#1a1a2e;color:#eee;min-height:100vh}"
+        ".hdr{background:#16213e;padding:1rem 2rem;display:flex;justify-content:space-between}"
+        ".hdr h1{font-size:1.5rem;color:#0df}.st{display:flex;gap:1rem;align-items:center}"
+        ".dot{width:12px;height:12px;border-radius:50%%;background:#4ade80}"
+        ".dot.off{background:#f87171}.cnt{display:flex;gap:1rem;padding:1rem;max-width:1400px;margin:0 auto}"
+        ".vp{flex:2}.sp{flex:1;display:flex;flex-direction:column;gap:1rem}"
+        ".cd{background:#16213e;border-radius:8px;padding:1rem}"
+        ".cd h2{font-size:1rem;color:#0df;margin-bottom:.5rem}"
+        ".vc{background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3}"
+        ".vc img{width:100%%;height:100%%;object-fit:contain}"
+        ".sg{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}"
+        ".s{background:#1a1a2e;padding:.75rem;border-radius:4px;text-align:center}"
+        ".sv{font-size:1.5rem;font-weight:bold;color:#0df}.sl{font-size:.75rem;color:#888}"
+        ".dl{max-height:300px;overflow-y:auto}"
+        ".di{display:flex;justify-content:space-between;padding:.5rem;background:#1a1a2e;"
+        "margin-bottom:.25rem;border-radius:4px}.lb{color:#4ade80}.cf{color:#fbbf24}"
+        "</style></head><body>"
+        "<div class=\"hdr\"><h1>CiRA Runtime</h1><div class=\"st\">"
+        "<span id=\"fps\">-- FPS</span><div class=\"dot\" id=\"dot\"></div></div></div>"
+        "<div class=\"cnt\"><div class=\"vp\"><div class=\"cd\"><h2>Live Stream</h2>"
+        "<div class=\"vc\"><img id=\"vid\" src=\"/stream/annotated\"></div></div></div>"
+        "<div class=\"sp\"><div class=\"cd\"><h2>Stats</h2><div class=\"sg\">"
+        "<div class=\"s\"><div class=\"sv\" id=\"dc\">0</div><div class=\"sl\">Detections</div></div>"
+        "<div class=\"s\"><div class=\"sv\" id=\"fv\">0</div><div class=\"sl\">FPS</div></div>"
+        "<div class=\"s\"><div class=\"sv\" id=\"td\">0</div><div class=\"sl\">Total</div></div>"
+        "<div class=\"s\"><div class=\"sv\" id=\"ut\">0s</div><div class=\"sl\">Uptime</div></div>"
+        "</div></div><div class=\"cd\"><h2>Model</h2>"
+        "<p>Status: <span id=\"ms\">-</span></p></div>"
+        "<div class=\"cd\"><h2>Detections</h2><div class=\"dl\" id=\"det\"></div></div>"
+        "</div></div><script>"
+        "async function u(){try{const[r,s]=await Promise.all(["
+        "fetch('/api/results').then(x=>x.json()),"
+        "fetch('/api/stats').then(x=>x.json())]);"
+        "document.getElementById('dc').textContent=r.count||0;"
+        "document.getElementById('fv').textContent=s.fps?s.fps.toFixed(1):'0';"
+        "document.getElementById('fps').textContent=(s.fps?s.fps.toFixed(1):'0')+' FPS';"
+        "document.getElementById('td').textContent=s.total_detections||0;"
+        "document.getElementById('ut').textContent=s.uptime_sec+'s';"
+        "document.getElementById('dot').className='dot'+(s.model_loaded?'':' off');"
+        "document.getElementById('ms').textContent=s.model_loaded?'Loaded':'Not loaded';"
+        "var l=document.getElementById('det');"
+        "if(r.detections&&r.detections.length>0){"
+        "l.innerHTML=r.detections.slice(0,10).map(d=>"
+        "'<div class=\"di\"><span class=\"lb\">'+d.label+'</span>'+"
+        "'<span class=\"cf\">'+(d.confidence*100).toFixed(1)+'%%</span></div>').join('');"
+        "}else{l.innerHTML='<p style=\"color:#666;text-align:center\">No detections</p>';}}"
+        "catch(e){}}setInterval(u,500);u();</script></body></html>"
+    );
+    g_html_initialized = 1;
+}
+
+/**
+ * Handle / endpoint - Web UI.
+ */
+static int handle_index(struct MHD_Connection* conn, cira_ctx* ctx) {
+    (void)ctx;
+    init_html_template();
+
+    struct MHD_Response* response = MHD_create_response_from_buffer(
+        strlen(g_html_template), g_html_template, MHD_RESPMEM_PERSISTENT);
+
+    MHD_add_response_header(response, "Content-Type", "text/html; charset=utf-8");
+    MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
+    MHD_destroy_response(response);
+
+    return ret;
+}
+
 /**
  * Handle 404 Not Found.
  */
@@ -472,6 +640,9 @@ static enum MHD_Result request_handler(
     }
 
     /* Route requests */
+    if (strcmp(url, "/") == 0 || strcmp(url, "/index.html") == 0) {
+        return handle_index(conn, ctx);
+    }
     if (strcmp(url, "/health") == 0) {
         return handle_health(conn, ctx);
     }
@@ -531,6 +702,7 @@ int server_start(cira_ctx* ctx, int port) {
     g_server->running = 1;
 
     fprintf(stderr, "HTTP server started on port %d\n", port);
+    fprintf(stderr, "  Web UI:    http://localhost:%d/\n", port);
     fprintf(stderr, "  Health:    http://localhost:%d/health\n", port);
     fprintf(stderr, "  Snapshot:  http://localhost:%d/snapshot\n", port);
     fprintf(stderr, "  Stream:    http://localhost:%d/stream/annotated\n", port);

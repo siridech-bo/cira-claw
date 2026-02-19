@@ -184,6 +184,19 @@ cira/fast:
 .PHONY : cira/fast
 
 #=============================================================================
+# Target rules for targets named test_onnx
+
+# Build rule for target.
+test_onnx: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 test_onnx
+.PHONY : test_onnx
+
+# fast build rule for target.
+test_onnx/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_onnx.dir\build.make CMakeFiles/test_onnx.dir/build
+.PHONY : test_onnx/fast
+
+#=============================================================================
 # Target rules for targets named test_stream
 
 # Build rule for target.
@@ -329,6 +342,30 @@ src/ncnn_loader.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/ncnn_loader.cpp.s
 .PHONY : src/ncnn_loader.cpp.s
 
+src/onnx_loader.obj: src/onnx_loader.c.obj
+.PHONY : src/onnx_loader.obj
+
+# target to build an object file
+src/onnx_loader.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/onnx_loader.c.obj
+.PHONY : src/onnx_loader.c.obj
+
+src/onnx_loader.i: src/onnx_loader.c.i
+.PHONY : src/onnx_loader.i
+
+# target to preprocess a source file
+src/onnx_loader.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/onnx_loader.c.i
+.PHONY : src/onnx_loader.c.i
+
+src/onnx_loader.s: src/onnx_loader.c.s
+.PHONY : src/onnx_loader.s
+
+# target to generate assembly for a file
+src/onnx_loader.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/onnx_loader.c.s
+.PHONY : src/onnx_loader.c.s
+
 src/stream_server.obj: src/stream_server.c.obj
 .PHONY : src/stream_server.obj
 
@@ -377,6 +414,30 @@ test/test_ncnn.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_ncnn.dir\build.make CMakeFiles/test_ncnn.dir/test/test_ncnn.c.s
 .PHONY : test/test_ncnn.c.s
 
+test/test_onnx.obj: test/test_onnx.c.obj
+.PHONY : test/test_onnx.obj
+
+# target to build an object file
+test/test_onnx.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_onnx.dir\build.make CMakeFiles/test_onnx.dir/test/test_onnx.c.obj
+.PHONY : test/test_onnx.c.obj
+
+test/test_onnx.i: test/test_onnx.c.i
+.PHONY : test/test_onnx.i
+
+# target to preprocess a source file
+test/test_onnx.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_onnx.dir\build.make CMakeFiles/test_onnx.dir/test/test_onnx.c.i
+.PHONY : test/test_onnx.c.i
+
+test/test_onnx.s: test/test_onnx.c.s
+.PHONY : test/test_onnx.s
+
+# target to generate assembly for a file
+test/test_onnx.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_onnx.dir\build.make CMakeFiles/test_onnx.dir/test/test_onnx.c.s
+.PHONY : test/test_onnx.c.s
+
 test/test_stream.obj: test/test_stream.c.obj
 .PHONY : test/test_stream.obj
 
@@ -416,6 +477,7 @@ help:
 	@echo ... test
 	@echo ... cira
 	@echo ... test_ncnn
+	@echo ... test_onnx
 	@echo ... test_stream
 	@echo ... src/annotator.obj
 	@echo ... src/annotator.i
@@ -432,12 +494,18 @@ help:
 	@echo ... src/ncnn_loader.obj
 	@echo ... src/ncnn_loader.i
 	@echo ... src/ncnn_loader.s
+	@echo ... src/onnx_loader.obj
+	@echo ... src/onnx_loader.i
+	@echo ... src/onnx_loader.s
 	@echo ... src/stream_server.obj
 	@echo ... src/stream_server.i
 	@echo ... src/stream_server.s
 	@echo ... test/test_ncnn.obj
 	@echo ... test/test_ncnn.i
 	@echo ... test/test_ncnn.s
+	@echo ... test/test_onnx.obj
+	@echo ... test/test_onnx.i
+	@echo ... test/test_onnx.s
 	@echo ... test/test_stream.obj
 	@echo ... test/test_stream.i
 	@echo ... test/test_stream.s

@@ -1180,6 +1180,62 @@ CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h
 
+CMakeFiles/cira.dir/src/onnx_loader.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/onnx_loader.c \
+  C:/msys64/mingw64/include/_mingw.h \
+  C:/msys64/mingw64/include/_mingw_mac.h \
+  C:/msys64/mingw64/include/_mingw_off_t.h \
+  C:/msys64/mingw64/include/_mingw_secapi.h \
+  C:/msys64/mingw64/include/_mingw_stat64.h \
+  C:/msys64/mingw64/include/_timeval.h \
+  C:/msys64/mingw64/include/concurrencysal.h \
+  C:/msys64/mingw64/include/corecrt.h \
+  C:/msys64/mingw64/include/corecrt_startup.h \
+  C:/msys64/mingw64/include/corecrt_stdio_config.h \
+  C:/msys64/mingw64/include/corecrt_wstdlib.h \
+  C:/msys64/mingw64/include/crtdefs.h \
+  C:/msys64/mingw64/include/dirent.h \
+  C:/msys64/mingw64/include/driverspecs.h \
+  C:/msys64/mingw64/include/errno.h \
+  C:/msys64/mingw64/include/io.h \
+  C:/msys64/mingw64/include/limits.h \
+  C:/msys64/mingw64/include/malloc.h \
+  C:/msys64/mingw64/include/math.h \
+  C:/msys64/mingw64/include/process.h \
+  C:/msys64/mingw64/include/pthread.h \
+  C:/msys64/mingw64/include/pthread_compat.h \
+  C:/msys64/mingw64/include/pthread_signal.h \
+  C:/msys64/mingw64/include/pthread_time.h \
+  C:/msys64/mingw64/include/pthread_unistd.h \
+  C:/msys64/mingw64/include/sal.h \
+  C:/msys64/mingw64/include/sched.h \
+  C:/msys64/mingw64/include/sdks/_mingw_ddk.h \
+  C:/msys64/mingw64/include/sec_api/stdio_s.h \
+  C:/msys64/mingw64/include/sec_api/stdlib_s.h \
+  C:/msys64/mingw64/include/sec_api/string_s.h \
+  C:/msys64/mingw64/include/sec_api/sys/timeb_s.h \
+  C:/msys64/mingw64/include/signal.h \
+  C:/msys64/mingw64/include/specstrings.h \
+  C:/msys64/mingw64/include/stddef.h \
+  C:/msys64/mingw64/include/stdint.h \
+  C:/msys64/mingw64/include/stdio.h \
+  C:/msys64/mingw64/include/stdlib.h \
+  C:/msys64/mingw64/include/string.h \
+  C:/msys64/mingw64/include/swprintf.inl \
+  C:/msys64/mingw64/include/sys/stat.h \
+  C:/msys64/mingw64/include/sys/timeb.h \
+  C:/msys64/mingw64/include/sys/types.h \
+  C:/msys64/mingw64/include/time.h \
+  C:/msys64/mingw64/include/vadefs.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/limits.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/mm_malloc.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdbool.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stddef.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdint.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
+  D:/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h
+
 CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/stream_server.c \
   C:/msys64/mingw64/include/_bsd_types.h \
   C:/msys64/mingw64/include/_mingw.h \
@@ -1499,6 +1555,12 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src
 
 
 C:/msys64/mingw64/include/ws2ipdef.h:
+
+D:/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h:
+
+C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdbool.h:
+
+D:/CiRA\ Claw/cira-edge/runtime/src/onnx_loader.c:
 
 C:/msys64/mingw64/include/ncnn/paramdict.h:
 

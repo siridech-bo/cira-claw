@@ -12,6 +12,9 @@ option(CIRA_ENABLE_VULKAN "Enable Vulkan for NCNN" OFF)
 option(CIRA_ENABLE_STREAMING "Enable HTTP streaming server" ON)
 option(CIRA_ENABLE_OPENCV "Enable OpenCV camera capture" ON)
 
+# Manual paths for libraries (Windows SDK downloads)
+set(ONNXRUNTIME_ROOT "" CACHE PATH "Path to ONNX Runtime installation (e.g., C:/onnxruntime-win-x64-1.17.0)")
+
 # C/C++ standards
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -25,12 +28,32 @@ endif()
 
 # Find dependencies
 if(CIRA_ENABLE_ONNX)
-    find_package(onnxruntime QUIET)
-    if(NOT onnxruntime_FOUND)
-        message(STATUS "ONNX Runtime not found, will try pkg-config")
-        find_package(PkgConfig)
-        if(PkgConfig_FOUND)
-            pkg_check_modules(ONNXRUNTIME onnxruntime)
+    if(ONNXRUNTIME_ROOT)
+        # Manual path specified (Windows SDK download)
+        message(STATUS "Looking for ONNX Runtime at: ${ONNXRUNTIME_ROOT}")
+        find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_c_api.h
+            PATHS ${ONNXRUNTIME_ROOT}/include
+            NO_DEFAULT_PATH)
+        find_library(ONNXRUNTIME_LIB onnxruntime
+            PATHS ${ONNXRUNTIME_ROOT}/lib
+            NO_DEFAULT_PATH)
+        if(ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIB)
+            set(ONNXRUNTIME_MANUAL_FOUND TRUE)
+            message(STATUS "ONNX Runtime found (manual path)")
+            message(STATUS "  Include: ${ONNXRUNTIME_INCLUDE_DIR}")
+            message(STATUS "  Library: ${ONNXRUNTIME_LIB}")
+        else()
+            message(WARNING "ONNX Runtime not found at ${ONNXRUNTIME_ROOT}")
+        endif()
+    else()
+        # Try CMake package first
+        find_package(onnxruntime QUIET)
+        if(NOT onnxruntime_FOUND)
+            message(STATUS "ONNX Runtime not found via CMake, trying pkg-config")
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(ONNXRUNTIME onnxruntime)
+            endif()
         endif()
     endif()
 endif()
@@ -118,13 +141,29 @@ target_include_directories(cira PUBLIC
 )
 
 # Link dependencies
-if(CIRA_ENABLE_ONNX AND onnxruntime_FOUND)
-    target_link_libraries(cira PRIVATE onnxruntime::onnxruntime)
-    target_compile_definitions(cira PRIVATE CIRA_ONNX_ENABLED)
-elseif(CIRA_ENABLE_ONNX AND ONNXRUNTIME_FOUND)
-    target_include_directories(cira PRIVATE ${ONNXRUNTIME_INCLUDE_DIRS})
-    target_link_libraries(cira PRIVATE ${ONNXRUNTIME_LIBRARIES})
-    target_compile_definitions(cira PRIVATE CIRA_ONNX_ENABLED)
+if(CIRA_ENABLE_ONNX)
+    if(ONNXRUNTIME_MANUAL_FOUND)
+        # Manual path (Windows SDK download)
+        # Use SYSTEM to suppress warnings from external headers
+        target_include_directories(cira SYSTEM PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        target_link_libraries(cira PRIVATE ${ONNXRUNTIME_LIB})
+        target_compile_definitions(cira PRIVATE CIRA_ONNX_ENABLED)
+        message(STATUS "ONNX Runtime enabled (manual path)")
+    elseif(onnxruntime_FOUND)
+        # CMake package
+        target_link_libraries(cira PRIVATE onnxruntime::onnxruntime)
+        target_compile_definitions(cira PRIVATE CIRA_ONNX_ENABLED)
+        message(STATUS "ONNX Runtime enabled (CMake package)")
+    elseif(ONNXRUNTIME_FOUND)
+        # pkg-config - use SYSTEM to suppress warnings from external headers
+        target_include_directories(cira SYSTEM PRIVATE ${ONNXRUNTIME_INCLUDE_DIRS})
+        target_link_libraries(cira PRIVATE ${ONNXRUNTIME_LIBRARIES})
+        target_compile_definitions(cira PRIVATE CIRA_ONNX_ENABLED)
+        message(STATUS "ONNX Runtime enabled (pkg-config)")
+    else()
+        message(WARNING "ONNX Runtime requested but not found. ONNX loader will be disabled.")
+        message(STATUS "  To enable, specify -DONNXRUNTIME_ROOT=/path/to/onnxruntime")
+    endif()
 endif()
 
 if(CIRA_ENABLE_TENSORRT AND TensorRT_FOUND)
