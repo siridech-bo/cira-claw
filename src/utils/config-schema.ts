@@ -24,12 +24,6 @@ export const LineChannelConfigSchema = z.object({
   channel_secret: z.string().optional(),
 });
 
-// Telegram channel configuration
-export const TelegramChannelConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  bot_token: z.string().optional(),
-});
-
 // MQTT channel configuration
 export const MqttChannelConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -49,14 +43,13 @@ export const WebChatChannelConfigSchema = z.object({
 // MODBUS server configuration
 export const ModbusConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  port: z.number().int().min(1).max(65535).default(502),
+  port: z.number().int().min(1).max(65535).default(1502),
   host: z.string().default('0.0.0.0'),
 });
 
 // Channels configuration
 export const ChannelsConfigSchema = z.object({
   line: LineChannelConfigSchema.default({}),
-  telegram: TelegramChannelConfigSchema.default({}),
   mqtt: MqttChannelConfigSchema.default({}),
   webchat: WebChatChannelConfigSchema.default({}),
   modbus: ModbusConfigSchema.default({}),
@@ -76,7 +69,7 @@ export const AlertsConfigSchema = z.object({
   defect_threshold: z.number().int().min(0).default(10),
   temperature_max: z.number().min(0).max(150).default(80),
   fps_min: z.number().min(0).default(5),
-  notify_channels: z.array(z.string()).default(['line', 'mqtt']),
+  notify_channels: z.array(z.string()).default(['mqtt']),
 });
 
 // Main CiRA configuration schema

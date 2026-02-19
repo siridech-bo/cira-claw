@@ -20,10 +20,6 @@
       "channel_access_token": "${LINE_CHANNEL_ACCESS_TOKEN}",
       "channel_secret": "${LINE_CHANNEL_SECRET}"
     },
-    "telegram": {
-      "enabled": false,
-      "bot_token": "${TELEGRAM_BOT_TOKEN}"
-    },
     "mqtt": {
       "enabled": true,
       "broker": "mqtt://localhost:1883",
@@ -38,7 +34,7 @@
     },
     "modbus": {
       "enabled": true,
-      "port": 502,
+      "port": 1502,
       "host": "0.0.0.0"
     }
   },
@@ -55,6 +51,6 @@
     "defect_threshold": 10,
     "temperature_max": 80,
     "fps_min": 5,
-    "notify_channels": ["line", "mqtt"]
+    "notify_channels": ["mqtt"]
   }
 }

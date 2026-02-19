@@ -27,6 +27,33 @@ export interface ToolResult {
   images?: string[];
 }
 
+export interface NodeStats {
+  nodeId: string;
+  timestamp: string;
+  totalDetections: number;
+  totalFrames: number;
+  fps: number;
+  uptimeSec: number;
+  modelLoaded: boolean;
+  byLabel: Record<string, number>;
+}
+
+export interface AccumulatedStats {
+  nodeId: string;
+  hourStart: string;
+  detections: number;
+  frames: number;
+  avgFps: number;
+  samples: number;
+}
+
+export interface AlertsConfig {
+  defect_threshold: number;
+  temperature_max: number;
+  fps_min: number;
+  notify_channels: string[];
+}
+
 export interface ToolContext {
   nodeManager?: {
     getAllNodes: () => Array<{ id: string; name: string; host: string; type: string }>;
@@ -36,6 +63,12 @@ export interface ToolContext {
     getSummary: () => { total: number; online: number; offline: number };
     checkNodeHealth: (node: unknown) => Promise<{ status: string }>;
   };
+  statsCollector?: {
+    getCurrentStats: (nodeId: string) => NodeStats | undefined;
+    getAllCurrentStats: () => NodeStats[];
+    getDailySummary: () => Promise<Record<string, { totalDetections: number; hours: AccumulatedStats[] }>>;
+  };
+  alertsConfig?: AlertsConfig;
 }
 
 // Tool definitions
@@ -362,6 +395,7 @@ export async function executeToolCall(
     case 'inference_stats': {
       const nodeId = input.node_id as string;
       const period = input.period as string;
+      const statsCollector = context?.statsCollector;
 
       if (!nodeManager) {
         return { data: { error: 'Node manager not available' } };
@@ -372,15 +406,52 @@ export async function executeToolCall(
         return { data: { error: `Node '${nodeId}' not found` } };
       }
 
+      // Get current stats from StatsCollector (most recent poll)
+      const currentStats = statsCollector?.getCurrentStats(nodeId);
+
+      // For historical data, get daily summary
+      let historicalData: { totalDetections: number; hours: AccumulatedStats[] } | null = null;
+      if (statsCollector && (period === 'today' || period === '1h')) {
+        try {
+          const summary = await statsCollector.getDailySummary();
+          historicalData = summary[nodeId] || null;
+        } catch {
+          // Ignore errors in getting historical data
+        }
+      }
+
+      // If we have stats from collector, return them
+      if (currentStats) {
+        return {
+          data: {
+            node_id: nodeId,
+            period,
+            current: {
+              total_detections: currentStats.totalDetections,
+              total_frames: currentStats.totalFrames,
+              fps: currentStats.fps,
+              uptime_sec: currentStats.uptimeSec,
+              model_loaded: currentStats.modelLoaded,
+              by_label: currentStats.byLabel,
+              timestamp: currentStats.timestamp,
+            },
+            today: historicalData ? {
+              total_detections: historicalData.totalDetections,
+              hours_recorded: historicalData.hours.length,
+            } : null,
+          },
+        };
+      }
+
+      // Fallback: query runtime directly
       const status = nodeManager.getNodeStatus(nodeId);
       if (status?.status !== 'online') {
-        return { data: { error: `Node '${nodeId}' is not online` } };
+        return { data: { error: `Node '${nodeId}' is not online and no cached stats available` } };
       }
 
       try {
-        // Query the node's REST API for inference stats
         const port = node.runtime?.port || 8080;
-        const url = `http://${node.host}:${port}/api/stats?period=${period}`;
+        const url = `http://${node.host}:${port}/api/stats`;
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
@@ -389,18 +460,14 @@ export async function executeToolCall(
         clearTimeout(timeout);
 
         if (!response.ok) {
-          // If endpoint doesn't exist, return basic stats from status
-          if (response.status === 404) {
-            return {
-              data: {
-                node_id: nodeId,
-                period,
-                note: 'Node does not support detailed stats endpoint',
-                current_inference: status?.inference || null,
-              },
-            };
-          }
-          return { data: { error: `Failed to get stats: HTTP ${response.status}` } };
+          return {
+            data: {
+              node_id: nodeId,
+              period,
+              note: 'Could not fetch stats from runtime',
+              current_inference: status?.inference || null,
+            },
+          };
         }
 
         const stats = await response.json() as Record<string, unknown>;
@@ -414,8 +481,6 @@ export async function executeToolCall(
         };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-
-        // If fetch fails, return whatever we have from status
         return {
           data: {
             node_id: nodeId,
@@ -712,49 +777,63 @@ export async function executeToolCall(
     }
 
     case 'alert_list': {
+      const alertsConfig = context?.alertsConfig;
+
+      if (!alertsConfig) {
+        return { data: { error: 'Alerts configuration not available' } };
+      }
+
       return {
         data: {
           alerts: [
             {
-              id: 'alert-1',
-              type: 'defect_threshold',
-              condition: 'defects > 50/hr',
-              channels: ['line', 'mqtt'],
+              id: 'defect_threshold',
+              type: 'defect_rate',
+              condition: `defects > ${alertsConfig.defect_threshold}/min`,
+              threshold: alertsConfig.defect_threshold,
+              channels: alertsConfig.notify_channels,
               enabled: true,
             },
             {
-              id: 'alert-2',
+              id: 'temperature_max',
               type: 'temperature',
-              condition: 'temperature > 80°C',
-              channels: ['line'],
+              condition: `temperature > ${alertsConfig.temperature_max}°C`,
+              threshold: alertsConfig.temperature_max,
+              channels: alertsConfig.notify_channels,
+              enabled: true,
+            },
+            {
+              id: 'fps_min',
+              type: 'fps',
+              condition: `fps < ${alertsConfig.fps_min}`,
+              threshold: alertsConfig.fps_min,
+              channels: alertsConfig.notify_channels,
               enabled: true,
             },
           ],
+          notify_channels: alertsConfig.notify_channels,
         },
       };
     }
 
     case 'alert_history': {
       const period = input.period as string;
+      const alertsConfig = context?.alertsConfig;
 
+      // TODO: Implement alert storage in StatsCollector to track triggered alerts
+      // For now, return config info and note that history requires storage implementation
       return {
         data: {
           period,
-          total_alerts: 5,
-          alerts: [
-            {
-              timestamp: '2026-02-17T14:30:00Z',
-              type: 'defect_threshold',
-              node_id: 'jetson-line1',
-              message: 'Defect rate exceeded 50/hr (current: 67/hr)',
-            },
-            {
-              timestamp: '2026-02-17T10:15:00Z',
-              type: 'temperature',
-              node_id: 'jetson-line2',
-              message: 'Temperature exceeded 80°C (current: 82°C)',
-            },
-          ],
+          note: 'Alert history storage not yet implemented. Showing current alert configuration.',
+          current_thresholds: alertsConfig ? {
+            defect_threshold: `${alertsConfig.defect_threshold}/min`,
+            temperature_max: `${alertsConfig.temperature_max}°C`,
+            fps_min: alertsConfig.fps_min,
+          } : null,
+          notify_channels: alertsConfig?.notify_channels || [],
+          total_alerts: 0,
+          alerts: [],
         },
       };
     }

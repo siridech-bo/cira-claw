@@ -1,7 +1,10 @@
 import { FastifyInstance } from 'fastify';
 import { WebSocket } from 'ws';
 import { CiraAgent, AgentMessage } from '../agent/agent.js';
+import { ToolContext } from '../agent/tools.js';
 import { NodeManager } from '../nodes/manager.js';
+import { StatsCollector } from '../services/stats-collector.js';
+import { AlertsConfig } from '../utils/config-schema.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('chat');
@@ -23,15 +26,26 @@ interface ChatResponse {
   }>;
 }
 
+export interface ChatDependencies {
+  agent: CiraAgent;
+  nodeManager: NodeManager;
+  statsCollector?: StatsCollector;
+  alertsConfig?: AlertsConfig;
+}
+
 export class ChatHandler {
   private clients: Set<WebSocket> = new Set();
   private agent: CiraAgent;
   private nodeManager: NodeManager;
+  private statsCollector?: StatsCollector;
+  private alertsConfig?: AlertsConfig;
   private conversationHistory: Map<WebSocket, AgentMessage[]> = new Map();
 
-  constructor(agent: CiraAgent, nodeManager: NodeManager) {
-    this.agent = agent;
-    this.nodeManager = nodeManager;
+  constructor(deps: ChatDependencies) {
+    this.agent = deps.agent;
+    this.nodeManager = deps.nodeManager;
+    this.statsCollector = deps.statsCollector;
+    this.alertsConfig = deps.alertsConfig;
   }
 
   handleConnection(socket: WebSocket): void {
@@ -112,9 +126,11 @@ export class ChatHandler {
         this.sendMessage(socket, { type: 'typing' });
 
         try {
-          // Get response from agent with full history
+          // Get response from agent with full history and context
           const response = await this.agent.chat(history, {
-            nodeManager: this.nodeManager as unknown as undefined,
+            nodeManager: this.nodeManager as unknown as ToolContext['nodeManager'],
+            statsCollector: this.statsCollector as unknown as ToolContext['statsCollector'],
+            alertsConfig: this.alertsConfig,
           });
 
           // Add assistant response to history
@@ -165,10 +181,9 @@ export class ChatHandler {
 
 export async function registerChatRoutes(
   fastify: FastifyInstance,
-  agent: CiraAgent,
-  nodeManager: NodeManager
+  deps: ChatDependencies
 ): Promise<ChatHandler> {
-  const handler = new ChatHandler(agent, nodeManager);
+  const handler = new ChatHandler(deps);
 
   // Chat WebSocket endpoint for AI agent conversations
   fastify.get('/chat', { websocket: true }, (socket, _request) => {

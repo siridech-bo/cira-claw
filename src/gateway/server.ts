@@ -94,9 +94,9 @@ export async function createGatewayServer(config: CiraConfig): Promise<GatewaySe
       timestamp: new Date().toISOString(),
       channels: {
         line: config.channels.line.enabled,
-        telegram: config.channels.telegram.enabled,
         mqtt: config.channels.mqtt.enabled,
         webchat: config.channels.webchat.enabled,
+        modbus: config.channels.modbus.enabled,
       },
     };
   });

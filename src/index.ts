@@ -233,9 +233,6 @@ async function main(): Promise<void> {
       logger.warn('AI agent not available - no API key configured');
     }
 
-    // Register WebChat routes for agent chat
-    await registerChatRoutes(gateway.fastify, agent, nodeManager);
-
     // Initialize LINE channel if enabled
     if (config.channels.line.enabled) {
       const lineCredentials = await loadLineCredentials(configLoader.credentialsPath);
@@ -278,6 +275,14 @@ async function main(): Promise<void> {
     );
     statsCollector.start(10000); // Poll every 10 seconds
     logger.info('Stats collector started');
+
+    // Register WebChat routes for agent chat (after statsCollector for real data)
+    await registerChatRoutes(gateway.fastify, {
+      agent,
+      nodeManager,
+      statsCollector,
+      alertsConfig: config.alerts,
+    });
 
     // Initialize MODBUS server if enabled
     if (config.channels.modbus.enabled) {

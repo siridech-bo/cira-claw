@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { AgentConfig } from '../utils/config-schema.js';
 import { createLogger } from '../utils/logger.js';
-import { Tool, ToolResult, getToolDefinitions, executeToolCall } from './tools.js';
+import { Tool, ToolResult, ToolContext, getToolDefinitions, executeToolCall } from './tools.js';
 import { loadSkills, Skill } from './skills.js';
 import { buildSystemPrompt } from './prompts.js';
 
@@ -80,7 +80,7 @@ export class CiraAgent {
 
   async chat(
     messages: AgentMessage[],
-    context?: { nodeManager?: unknown }
+    context?: ToolContext
   ): Promise<AgentResponse> {
     if (!this.client) {
       return {
@@ -221,7 +221,7 @@ export class CiraAgent {
   }
 
   // Simple single-turn chat for CLI usage
-  async query(prompt: string, context?: { nodeManager?: unknown }): Promise<string> {
+  async query(prompt: string, context?: ToolContext): Promise<string> {
     const response = await this.chat([{ role: 'user', content: prompt }], context);
     return response.content;
   }
