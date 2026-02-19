@@ -23,6 +23,20 @@
 #include <microhttpd.h>
 #include <pthread.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#define usleep(x) Sleep((x) / 1000)
+#else
+#include <unistd.h>
+#endif
+
+/* JPEG encoder functions (from jpeg_encoder.cpp) */
+extern int jpeg_encode(const uint8_t* rgb_data, int width, int height,
+                       int quality, uint8_t** out_data, size_t* out_size);
+extern int jpeg_encode_annotated(cira_ctx* ctx, const uint8_t* rgb_data,
+                                  int width, int height, int quality,
+                                  uint8_t** out_data, size_t* out_size);
+
 /* Content types */
 #define CT_JSON "application/json"
 #define CT_JPEG "image/jpeg"
@@ -45,6 +59,114 @@ typedef struct {
 
 /* Global server state (one per context) */
 static server_state_t* g_server = NULL;
+
+/* MJPEG streaming context */
+typedef struct {
+    cira_ctx* ctx;
+    int annotated;          /* 1 for annotated, 0 for raw */
+    int frame_sent;         /* Number of frames sent */
+    int header_sent;        /* Boundary header sent for current frame */
+    uint8_t* jpeg_data;     /* Current JPEG data */
+    size_t jpeg_size;       /* Current JPEG size */
+    size_t jpeg_offset;     /* Bytes sent from current frame */
+} stream_ctx_t;
+
+/* MJPEG stream callback for libmicrohttpd */
+static ssize_t stream_callback(void* cls, uint64_t pos, char* buf, size_t max) {
+    (void)pos;
+    stream_ctx_t* sctx = (stream_ctx_t*)cls;
+
+    if (!sctx || !sctx->ctx) {
+        return MHD_CONTENT_READER_END_WITH_ERROR;
+    }
+
+    /* Check if server is still running */
+    if (!g_server || !g_server->running) {
+        return MHD_CONTENT_READER_END_OF_STREAM;
+    }
+
+    /* If we haven't sent a frame yet, or finished the current frame */
+    if (sctx->jpeg_data == NULL || sctx->jpeg_offset >= sctx->jpeg_size) {
+        /* Get new frame */
+        int w, h;
+        const uint8_t* frame = cira_get_frame(sctx->ctx, &w, &h);
+
+        if (!frame || w <= 0 || h <= 0) {
+            /* No frame available, wait a bit and return empty */
+            usleep(10000);  /* 10ms */
+            return 0;
+        }
+
+        /* Encode frame to JPEG */
+        uint8_t* jpeg;
+        size_t jpeg_size;
+        int ret;
+
+        if (sctx->annotated) {
+            ret = jpeg_encode_annotated(sctx->ctx, frame, w, h, 80, &jpeg, &jpeg_size);
+        } else {
+            ret = jpeg_encode(frame, w, h, 80, &jpeg, &jpeg_size);
+        }
+
+        if (ret != CIRA_OK || !jpeg || jpeg_size == 0) {
+            usleep(10000);
+            return 0;
+        }
+
+        sctx->jpeg_data = jpeg;
+        sctx->jpeg_size = jpeg_size;
+        sctx->jpeg_offset = 0;
+        sctx->header_sent = 0;
+    }
+
+    size_t written = 0;
+
+    /* Send boundary header if not sent */
+    if (!sctx->header_sent) {
+        const char* boundary = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ";
+        char header[128];
+        snprintf(header, sizeof(header), "%s%zu\r\n\r\n", boundary, sctx->jpeg_size);
+        size_t hlen = strlen(header);
+
+        if (hlen > max) {
+            memcpy(buf, header, max);
+            return (ssize_t)max;
+        }
+
+        memcpy(buf, header, hlen);
+        written = hlen;
+        sctx->header_sent = 1;
+    }
+
+    /* Send JPEG data */
+    size_t remaining = sctx->jpeg_size - sctx->jpeg_offset;
+    size_t space = max - written;
+    size_t to_send = (remaining < space) ? remaining : space;
+
+    if (to_send > 0) {
+        memcpy(buf + written, sctx->jpeg_data + sctx->jpeg_offset, to_send);
+        sctx->jpeg_offset += to_send;
+        written += to_send;
+    }
+
+    /* Add trailing CRLF after frame */
+    if (sctx->jpeg_offset >= sctx->jpeg_size && written + 2 <= max) {
+        buf[written++] = '\r';
+        buf[written++] = '\n';
+        sctx->frame_sent++;
+        sctx->jpeg_data = NULL;  /* Mark for next frame */
+    }
+
+    return (ssize_t)written;
+}
+
+/* Cleanup callback for stream context */
+static void stream_free_callback(void* cls) {
+    stream_ctx_t* sctx = (stream_ctx_t*)cls;
+    if (sctx) {
+        free(sctx);
+    }
+}
 
 /* Helper: Get current timestamp as string */
 static void get_timestamp(char* buf, size_t size) {
@@ -142,20 +264,45 @@ static int handle_results(struct MHD_Connection* conn, cira_ctx* ctx) {
  * Handle /snapshot endpoint.
  */
 static int handle_snapshot(struct MHD_Connection* conn, cira_ctx* ctx) {
-    (void)ctx;
+    /* Get latest frame */
+    int w, h;
+    const uint8_t* frame = cira_get_frame(ctx, &w, &h);
 
-    /* TODO: Get frame from ctx and encode as JPEG */
-    /* For now, return a placeholder */
+    if (!frame || w <= 0 || h <= 0) {
+        const char* error = "{\"error\":\"No frame available\"}";
+        struct MHD_Response* response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(response, "Content-Type", CT_JSON);
+        MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_SERVICE_UNAVAILABLE, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
 
-    const char* error = "{\"error\":\"No frame available\"}";
+    /* Encode to JPEG with annotations */
+    uint8_t* jpeg;
+    size_t jpeg_size;
+    int enc_ret = jpeg_encode_annotated(ctx, frame, w, h, 90, &jpeg, &jpeg_size);
 
+    if (enc_ret != CIRA_OK || !jpeg || jpeg_size == 0) {
+        const char* error = "{\"error\":\"JPEG encoding failed\"}";
+        struct MHD_Response* response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(response, "Content-Type", CT_JSON);
+        int ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    /* Return JPEG image */
     struct MHD_Response* response = MHD_create_response_from_buffer(
-        strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        jpeg_size, jpeg, MHD_RESPMEM_MUST_COPY);
 
-    MHD_add_response_header(response, "Content-Type", CT_JSON);
+    MHD_add_response_header(response, "Content-Type", CT_JPEG);
     MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+    MHD_add_response_header(response, "Cache-Control", "no-cache, no-store");
 
-    int ret = MHD_queue_response(conn, MHD_HTTP_SERVICE_UNAVAILABLE, response);
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
     MHD_destroy_response(response);
 
     return ret;
@@ -164,31 +311,55 @@ static int handle_snapshot(struct MHD_Connection* conn, cira_ctx* ctx) {
 /**
  * Handle /stream/annotated endpoint (MJPEG).
  */
-static int handle_stream(struct MHD_Connection* conn, cira_ctx* ctx) {
-    (void)ctx;
+static int handle_stream(struct MHD_Connection* conn, cira_ctx* ctx, int annotated) {
+    /* Allocate streaming context */
+    stream_ctx_t* sctx = (stream_ctx_t*)calloc(1, sizeof(stream_ctx_t));
+    if (!sctx) {
+        const char* error = "{\"error\":\"Memory allocation failed\"}";
+        struct MHD_Response* response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(response, "Content-Type", CT_JSON);
+        int ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
 
-    /* TODO: Implement MJPEG streaming */
-    /*
-     * MJPEG streaming works by:
-     * 1. Sending Content-Type: multipart/x-mixed-replace; boundary=frame
-     * 2. For each frame:
-     *    - Send: --frame\r\n
-     *    - Send: Content-Type: image/jpeg\r\n\r\n
-     *    - Send: <JPEG data>
-     *    - Send: \r\n
-     * 3. Repeat until client disconnects
-     *
-     * MHD needs a callback-based approach for streaming.
-     */
+    sctx->ctx = ctx;
+    sctx->annotated = annotated;
+    sctx->frame_sent = 0;
+    sctx->header_sent = 0;
+    sctx->jpeg_data = NULL;
+    sctx->jpeg_size = 0;
+    sctx->jpeg_offset = 0;
 
-    const char* error = "{\"error\":\"Streaming not implemented\"}";
+    /* Create streaming response using callback */
+    struct MHD_Response* response = MHD_create_response_from_callback(
+        MHD_SIZE_UNKNOWN,           /* Unknown total size (streaming) */
+        32768,                      /* Block size */
+        stream_callback,            /* Callback function */
+        sctx,                       /* Callback context */
+        stream_free_callback        /* Free callback */
+    );
 
-    struct MHD_Response* response = MHD_create_response_from_buffer(
-        strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+    if (!response) {
+        free(sctx);
+        const char* error = "{\"error\":\"Failed to create response\"}";
+        struct MHD_Response* err_response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(err_response, "Content-Type", CT_JSON);
+        int ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, err_response);
+        MHD_destroy_response(err_response);
+        return ret;
+    }
 
-    MHD_add_response_header(response, "Content-Type", CT_JSON);
+    /* Set MJPEG headers */
+    MHD_add_response_header(response, "Content-Type", CT_MJPEG);
+    MHD_add_response_header(response, "Cache-Control", "no-cache, no-store, must-revalidate");
+    MHD_add_response_header(response, "Pragma", "no-cache");
+    MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+    MHD_add_response_header(response, "Connection", "close");
 
-    int ret = MHD_queue_response(conn, MHD_HTTP_NOT_IMPLEMENTED, response);
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
     MHD_destroy_response(response);
 
     return ret;
@@ -246,10 +417,11 @@ static enum MHD_Result request_handler(
     if (strcmp(url, "/snapshot") == 0) {
         return handle_snapshot(conn, ctx);
     }
-    if (strcmp(url, "/stream/annotated") == 0 ||
-        strcmp(url, "/stream/raw") == 0 ||
-        strcmp(url, "/stream") == 0) {
-        return handle_stream(conn, ctx);
+    if (strcmp(url, "/stream/annotated") == 0 || strcmp(url, "/stream") == 0) {
+        return handle_stream(conn, ctx, 1);  /* Annotated */
+    }
+    if (strcmp(url, "/stream/raw") == 0) {
+        return handle_stream(conn, ctx, 0);  /* Raw */
     }
 
     return handle_not_found(conn);

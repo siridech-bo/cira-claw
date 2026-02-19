@@ -17,7 +17,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#define sleep(x) Sleep((x) * 1000)
+#else
 #include <unistd.h>
+#endif
 
 static volatile int running = 1;
 
@@ -32,11 +38,22 @@ int main(int argc, char* argv[]) {
     printf("Version: %s\n\n", cira_version());
 
     int port = 8080;
-    if (argc > 1) {
-        port = atoi(argv[1]);
-        if (port <= 0 || port > 65535) {
-            fprintf(stderr, "Invalid port: %s\n", argv[1]);
-            return 1;
+    const char* model_path = NULL;
+
+    /* Parse arguments */
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] == '-') {
+            /* Skip flags */
+        } else if (model_path == NULL) {
+            /* First non-flag arg is model path */
+            model_path = argv[i];
+        } else {
+            /* Second non-flag arg is port */
+            port = atoi(argv[i]);
+            if (port <= 0 || port > 65535) {
+                fprintf(stderr, "Invalid port: %s\n", argv[i]);
+                return 1;
+            }
         }
     }
 
@@ -52,6 +69,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    /* Load model if specified */
+    if (model_path) {
+        printf("Loading model from: %s\n", model_path);
+        int result = cira_load(ctx, model_path);
+        if (result != CIRA_OK) {
+            fprintf(stderr, "Warning: Failed to load model: %d\n", result);
+            const char* err = cira_error(ctx);
+            if (err) fprintf(stderr, "Error: %s\n", err);
+            printf("Continuing without model (no detections)\n");
+        } else {
+            printf("Model loaded successfully!\n");
+        }
+    } else {
+        printf("No model specified. Usage: %s [model_path] [port]\n", argv[0]);
+        printf("Continuing without model (no detections)\n");
+    }
+
     /* Start HTTP server */
     printf("Starting HTTP server on port %d...\n", port);
     int result = cira_start_server(ctx, port);
@@ -63,11 +97,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    /* Start camera capture (device 0) */
+    printf("Starting camera on device 0...\n");
+    result = cira_start_camera(ctx, 0);
+    if (result != CIRA_OK) {
+        fprintf(stderr, "Warning: Failed to start camera: %d\n", result);
+        fprintf(stderr, "Streaming will not have video frames.\n");
+    } else {
+        printf("Camera started successfully!\n");
+    }
+
     printf("\nServer running. Press Ctrl+C to stop.\n\n");
     printf("Endpoints:\n");
     printf("  Health:  http://localhost:%d/health\n", port);
     printf("  Results: http://localhost:%d/api/results\n", port);
+    printf("  Snapshot: http://localhost:%d/snapshot\n", port);
     printf("  Stream:  http://localhost:%d/stream/annotated\n", port);
+    printf("  Raw:     http://localhost:%d/stream/raw\n", port);
     printf("\n");
 
     /* Run until interrupted */
@@ -82,6 +128,8 @@ int main(int argc, char* argv[]) {
     }
 
     /* Cleanup */
+    printf("Stopping camera...\n");
+    cira_stop_camera(ctx);
     printf("Stopping server...\n");
     cira_stop_server(ctx);
     cira_destroy(ctx);

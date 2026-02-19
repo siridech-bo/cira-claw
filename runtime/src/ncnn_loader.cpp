@@ -435,11 +435,28 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
 
     /* Convert to cira format */
     for (const auto& det : detections) {
-        /* Convert from pixel coordinates to normalized [0, 1] */
-        float norm_x = det.x1 / w;
-        float norm_y = det.y1 / h;
-        float norm_w = (det.x2 - det.x1) / w;
-        float norm_h = (det.y2 - det.y1) / h;
+        float norm_x, norm_y, norm_w, norm_h;
+
+        /* Check if coordinates are already normalized (0-1 range) */
+        /* Yolov3DetectionOutput layer outputs normalized coordinates */
+        bool already_normalized = (det.x1 >= 0.0f && det.x1 <= 1.0f &&
+                                   det.y1 >= 0.0f && det.y1 <= 1.0f &&
+                                   det.x2 >= 0.0f && det.x2 <= 1.0f &&
+                                   det.y2 >= 0.0f && det.y2 <= 1.0f);
+
+        if (already_normalized) {
+            /* Coordinates are already in 0-1 range */
+            norm_x = det.x1;
+            norm_y = det.y1;
+            norm_w = det.x2 - det.x1;
+            norm_h = det.y2 - det.y1;
+        } else {
+            /* Convert from pixel coordinates to normalized [0, 1] */
+            norm_x = det.x1 / w;
+            norm_y = det.y1 / h;
+            norm_w = (det.x2 - det.x1) / w;
+            norm_h = (det.y2 - det.y1) / h;
+        }
 
         /* Clamp to valid range */
         norm_x = std::max(0.0f, std::min(1.0f, norm_x));

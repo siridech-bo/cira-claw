@@ -1,4 +1,5 @@
 D:/CiRA Claw/cira-edge/runtime/build/CMakeFiles/cira.dir
+D:/CiRA Claw/cira-edge/runtime/build/CMakeFiles/test_stream.dir
 D:/CiRA Claw/cira-edge/runtime/build/CMakeFiles/test_ncnn.dir
 D:/CiRA Claw/cira-edge/runtime/build/CMakeFiles/test.dir
 D:/CiRA Claw/cira-edge/runtime/build/CMakeFiles/edit_cache.dir

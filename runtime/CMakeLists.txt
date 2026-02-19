@@ -10,6 +10,7 @@ option(CIRA_ENABLE_TENSORRT "Enable TensorRT loader" OFF)
 option(CIRA_ENABLE_NCNN "Enable NCNN loader" OFF)
 option(CIRA_ENABLE_VULKAN "Enable Vulkan for NCNN" OFF)
 option(CIRA_ENABLE_STREAMING "Enable HTTP streaming server" ON)
+option(CIRA_ENABLE_OPENCV "Enable OpenCV camera capture" ON)
 
 # C/C++ standards
 set(CMAKE_C_STANDARD 11)
@@ -61,6 +62,19 @@ if(CIRA_ENABLE_NCNN)
     endif()
 endif()
 
+# OpenCV for cross-platform camera capture
+if(CIRA_ENABLE_STREAMING AND CIRA_ENABLE_OPENCV)
+    find_package(OpenCV QUIET COMPONENTS core imgproc videoio imgcodecs)
+    if(NOT OpenCV_FOUND)
+        message(STATUS "OpenCV not found. Camera capture will be disabled.")
+        message(STATUS "  Windows: pacman -S mingw-w64-x86_64-opencv (MSYS2)")
+        message(STATUS "  Linux:   sudo apt install libopencv-dev")
+        message(STATUS "  macOS:   brew install opencv")
+    else()
+        message(STATUS "OpenCV found: ${OpenCV_VERSION}")
+    endif()
+endif()
+
 # Source files
 set(CIRA_SOURCES
     src/cira.c
@@ -85,7 +99,8 @@ endif()
 if(CIRA_ENABLE_STREAMING)
     list(APPEND CIRA_SOURCES
         src/stream_server.c
-        src/camera.c
+        src/camera.cpp
+        src/jpeg_encoder.cpp
         src/annotator.c
     )
 endif()
@@ -143,10 +158,19 @@ if(CIRA_ENABLE_STREAMING)
     if(MICROHTTPD_LIB)
         target_link_libraries(cira PRIVATE ${MICROHTTPD_LIB})
     endif()
+    # OpenCV for camera capture
+    if(OpenCV_FOUND)
+        target_include_directories(cira PRIVATE ${OpenCV_INCLUDE_DIRS})
+        target_link_libraries(cira PRIVATE ${OpenCV_LIBS})
+        target_compile_definitions(cira PRIVATE CIRA_OPENCV_ENABLED)
+        message(STATUS "OpenCV camera capture enabled")
+    endif()
 endif()
 
-# Math library
-target_link_libraries(cira PRIVATE m)
+# Math library (not needed on Windows)
+if(NOT WIN32)
+    target_link_libraries(cira PRIVATE m)
+endif()
 
 # Thread library
 find_package(Threads REQUIRED)
