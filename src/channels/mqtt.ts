@@ -130,7 +130,7 @@ export class MqttChannel {
     const action = command.action || topic.split('/').pop();
     const replyTopic = command.reply_topic || topic.replace('/command/', '/results/');
 
-    logger.info(`MQTT command: ${action}`, { command });
+    logger.info({ command }, `MQTT command: ${action}`);
 
     let result: unknown;
 

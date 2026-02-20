@@ -5816,3 +5816,300 @@ events:
         - "C:/msys64/mingw64/bin"
         - "/bin"
 ...
+
+---
+events:
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/msys64/mingw64/share/cmake/Modules/FindVulkan.cmake:392 (find_path)"
+      - "CMakeLists.txt:84 (find_package)"
+    mode: "path"
+    variable: "Vulkan_INCLUDE_DIR"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "vulkan/vulkan.h"
+    candidate_directories:
+      - "/include/"
+      - "C:/msys64/mingw64/bin/"
+      - "C:/msys64/usr/local/bin/"
+      - "C:/msys64/usr/bin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/msys64/usr/bin/site_perl/"
+      - "C:/msys64/usr/bin/vendor_perl/"
+      - "C:/msys64/usr/bin/core_perl/"
+      - "C:/msys64/mingw64/include/"
+      - "C:/msys64/mingw64/"
+      - "C:/Program Files/include/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/include/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files (x86)/cira/include/"
+      - "C:/Program Files (x86)/cira/"
+    searched_directories:
+      - "/include/vulkan/vulkan.h"
+      - "C:/msys64/mingw64/bin/vulkan/vulkan.h"
+      - "C:/msys64/usr/local/bin/vulkan/vulkan.h"
+      - "C:/msys64/usr/bin/vulkan/vulkan.h"
+      - "C:/Windows/System32/vulkan/vulkan.h"
+      - "C:/Windows/vulkan/vulkan.h"
+      - "C:/Windows/System32/wbem/vulkan/vulkan.h"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/vulkan/vulkan.h"
+      - "C:/msys64/usr/bin/site_perl/vulkan/vulkan.h"
+      - "C:/msys64/usr/bin/vendor_perl/vulkan/vulkan.h"
+      - "C:/msys64/usr/bin/core_perl/vulkan/vulkan.h"
+      - "C:/msys64/mingw64/include/vulkan/vulkan.h"
+      - "C:/msys64/mingw64/vulkan/vulkan.h"
+      - "C:/Program Files/include/vulkan/vulkan.h"
+      - "C:/Program Files/vulkan/vulkan.h"
+      - "C:/Program Files (x86)/include/vulkan/vulkan.h"
+      - "C:/Program Files (x86)/vulkan/vulkan.h"
+      - "C:/Program Files (x86)/cira/include/vulkan/vulkan.h"
+      - "C:/Program Files (x86)/cira/vulkan/vulkan.h"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\msys64\\mingw64\\bin"
+        - "C:\\msys64\\usr\\local\\bin"
+        - "C:\\msys64\\usr\\bin"
+        - "C:\\msys64\\usr\\bin"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\msys64\\usr\\bin\\site_perl"
+        - "C:\\msys64\\usr\\bin\\vendor_perl"
+        - "C:\\msys64\\usr\\bin\\core_perl"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/cira"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/msys64/mingw64"
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/msys64/mingw64"
+        - "C:/Program Files (x86)/cira"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/msys64/mingw64/share/cmake/Modules/FindVulkan.cmake:399 (find_library)"
+      - "CMakeLists.txt:84 (find_package)"
+    mode: "library"
+    variable: "Vulkan_LIBRARY"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "vulkan-1"
+    candidate_directories:
+      - "/lib/"
+      - "/bin/"
+      - "C:/msys64/mingw64/bin/"
+      - "C:/msys64/usr/local/bin/"
+      - "C:/msys64/usr/bin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/msys64/usr/bin/site_perl/"
+      - "C:/msys64/usr/bin/vendor_perl/"
+      - "C:/msys64/usr/bin/core_perl/"
+      - "C:/msys64/mingw64/lib/"
+      - "C:/msys64/mingw64/"
+      - "C:/Program Files/lib/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/lib/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files (x86)/cira/lib/"
+      - "C:/Program Files (x86)/cira/"
+      - "C:/Program Files (x86)/cira/bin/"
+    searched_directories:
+      - "/lib/"
+      - "/bin/"
+      - "C:/msys64/mingw64/bin/"
+      - "C:/msys64/usr/local/bin/"
+      - "C:/msys64/usr/bin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/msys64/usr/bin/site_perl/"
+      - "C:/msys64/usr/bin/vendor_perl/"
+      - "C:/msys64/usr/bin/core_perl/"
+    found: "C:/msys64/mingw64/lib/libvulkan-1.dll.a"
+    search_context:
+      ENV{PATH}:
+        - "C:\\msys64\\mingw64\\bin"
+        - "C:\\msys64\\usr\\local\\bin"
+        - "C:\\msys64\\usr\\bin"
+        - "C:\\msys64\\usr\\bin"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\msys64\\usr\\bin\\site_perl"
+        - "C:\\msys64\\usr\\bin\\vendor_perl"
+        - "C:\\msys64\\usr\\bin\\core_perl"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/cira"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/msys64/mingw64"
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/msys64/mingw64"
+        - "C:/Program Files (x86)/cira"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "C:/Program Files (x86)/cira/bin"
+        - "C:/msys64/mingw64/bin"
+        - "/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/msys64/mingw64/share/cmake/Modules/FindVulkan.cmake:407 (find_program)"
+      - "CMakeLists.txt:84 (find_package)"
+    mode: "program"
+    variable: "Vulkan_GLSLC_EXECUTABLE"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "glslc"
+    candidate_directories:
+      - "/bin/"
+      - "C:/msys64/mingw64/bin/"
+      - "C:/msys64/usr/local/bin/"
+      - "C:/msys64/usr/bin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/msys64/usr/bin/site_perl/"
+      - "C:/msys64/usr/bin/vendor_perl/"
+      - "C:/msys64/usr/bin/core_perl/"
+      - "C:/msys64/mingw64/bin/"
+      - "C:/msys64/mingw64/sbin/"
+      - "C:/msys64/mingw64/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files (x86)/cira/bin/"
+      - "C:/Program Files (x86)/cira/sbin/"
+      - "C:/Program Files (x86)/cira/"
+    searched_directories:
+      - "/bin/glslc.com"
+      - "/bin/glslc.exe"
+      - "/bin/glslc"
+      - "C:/msys64/mingw64/bin/glslc.com"
+    found: "C:/msys64/mingw64/bin/glslc.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\msys64\\mingw64\\bin"
+        - "C:\\msys64\\usr\\local\\bin"
+        - "C:\\msys64\\usr\\bin"
+        - "C:\\msys64\\usr\\bin"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\msys64\\usr\\bin\\site_perl"
+        - "C:\\msys64\\usr\\bin\\vendor_perl"
+        - "C:\\msys64\\usr\\bin\\core_perl"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/cira"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/msys64/mingw64"
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/msys64/mingw64"
+        - "C:/Program Files (x86)/cira"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/msys64/mingw64/share/cmake/Modules/FindVulkan.cmake:415 (find_program)"
+      - "CMakeLists.txt:84 (find_package)"
+    mode: "program"
+    variable: "Vulkan_GLSLANG_VALIDATOR_EXECUTABLE"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "glslangValidator"
+    candidate_directories:
+      - "/bin/"
+      - "C:/msys64/mingw64/bin/"
+      - "C:/msys64/usr/local/bin/"
+      - "C:/msys64/usr/bin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/msys64/usr/bin/site_perl/"
+      - "C:/msys64/usr/bin/vendor_perl/"
+      - "C:/msys64/usr/bin/core_perl/"
+      - "C:/msys64/mingw64/bin/"
+      - "C:/msys64/mingw64/sbin/"
+      - "C:/msys64/mingw64/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files (x86)/cira/bin/"
+      - "C:/Program Files (x86)/cira/sbin/"
+      - "C:/Program Files (x86)/cira/"
+    searched_directories:
+      - "/bin/glslangValidator.com"
+      - "/bin/glslangValidator.exe"
+      - "/bin/glslangValidator"
+      - "C:/msys64/mingw64/bin/glslangValidator.com"
+    found: "C:/msys64/mingw64/bin/glslangValidator.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\msys64\\mingw64\\bin"
+        - "C:\\msys64\\usr\\local\\bin"
+        - "C:\\msys64\\usr\\bin"
+        - "C:\\msys64\\usr\\bin"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\msys64\\usr\\bin\\site_perl"
+        - "C:\\msys64\\usr\\bin\\vendor_perl"
+        - "C:\\msys64\\usr\\bin\\core_perl"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/cira"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/msys64/mingw64"
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/msys64/mingw64"
+        - "C:/Program Files (x86)/cira"
+...

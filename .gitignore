@@ -48,3 +48,18 @@ pids/
 tmp/
 temp/
 *.tmp
+
+# C Runtime build artifacts
+runtime/build/
+runtime/*.exe
+runtime/*.dll
+runtime/*.so
+runtime/*.dylib
+
+# Model files (large binaries)
+models/
+*.weights
+*.onnx
+*.param
+*.bin
+!workspace/models/.gitkeep

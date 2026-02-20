@@ -5,15 +5,15 @@
  * Can start without a model and load one later via the API or dashboard.
  *
  * Usage:
- *   ./test_stream [model_path] [-p port]
- *   ./test_stream -p 8080              # Start without model (load via dashboard)
- *   ./test_stream ./models/yolo        # Start with model on default port
- *   ./test_stream ./models/yolo -p 9000
+ *   ./test_stream [model_path] [-p port] [-m models_dir]
+ *   ./test_stream -m D:/models         # Start with models dropdown
+ *   ./test_stream -m D:/models -p 8080 # Start with models on custom port
+ *   ./test_stream ./models/yolo        # Start with model preloaded
  *
  * Then visit:
  *   http://localhost:8080/health
  *   http://localhost:8080/api/results
- *   http://localhost:8080/api/models   # List available models
+ *   http://localhost:8080/api/models   # List available models from -m dir
  *   POST /api/model                    # Switch model at runtime
  *
  * (c) CiRA Robotics / KMITL 2026
@@ -34,6 +34,9 @@
 
 static volatile int running = 1;
 
+/* External function to set models directory */
+extern void server_set_models_dir(const char* dir);
+
 static void signal_handler(int sig) {
     (void)sig;
     running = 0;
@@ -46,6 +49,7 @@ int main(int argc, char* argv[]) {
 
     int port = 8080;
     const char* model_path = NULL;
+    const char* models_dir = NULL;
 
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
@@ -57,18 +61,30 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
             }
+        } else if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "--models-dir") == 0) {
+            if (i + 1 < argc) {
+                models_dir = argv[++i];
+            }
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            printf("Usage: %s [model_path] [-p port]\n", argv[0]);
-            printf("  model_path   Path to model directory (optional, can load later via API)\n");
-            printf("  -p, --port   HTTP server port (default: 8080)\n");
+            printf("Usage: %s [model_path] [-p port] [-m models_dir]\n", argv[0]);
+            printf("  model_path       Path to model directory (optional, can load later via API)\n");
+            printf("  -p, --port       HTTP server port (default: 8080)\n");
+            printf("  -m, --models-dir Directory containing models for dropdown selection\n");
             printf("\nExample:\n");
-            printf("  %s -p 8080                    # Start without model\n", argv[0]);
-            printf("  %s ./models/yolo -p 8080     # Start with model\n", argv[0]);
+            printf("  %s -p 8080                         # Start without model\n", argv[0]);
+            printf("  %s -m D:/models -p 8080            # Start with models directory\n", argv[0]);
+            printf("  %s ./models/yolo -p 8080           # Start with model preloaded\n", argv[0]);
             return 0;
         } else if (argv[i][0] != '-') {
             /* Positional arg is model path */
             model_path = argv[i];
         }
+    }
+
+    /* Set models directory for API listing */
+    if (models_dir) {
+        server_set_models_dir(models_dir);
+        printf("Models directory: %s\n", models_dir);
     }
 
     /* Setup signal handlers */

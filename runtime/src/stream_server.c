@@ -99,6 +99,12 @@ static ssize_t stream_callback(void* cls, uint64_t pos, char* buf, size_t max) {
 
     /* If we haven't sent a frame yet, or finished the current frame */
     if (sctx->jpeg_data == NULL || sctx->jpeg_offset >= sctx->jpeg_size) {
+        /* Free previous frame data if any */
+        if (sctx->jpeg_data) {
+            free(sctx->jpeg_data);
+            sctx->jpeg_data = NULL;
+        }
+
         /* Get new frame */
         int w, h;
         const uint8_t* frame = cira_get_frame(sctx->ctx, &w, &h);
@@ -109,23 +115,29 @@ static ssize_t stream_callback(void* cls, uint64_t pos, char* buf, size_t max) {
             return 0;
         }
 
-        /* Encode frame to JPEG */
-        uint8_t* jpeg;
+        /* Encode frame to JPEG (returns pointer to shared internal buffer) */
+        uint8_t* jpeg_ptr;
         size_t jpeg_size;
         int ret;
 
         if (sctx->annotated) {
-            ret = jpeg_encode_annotated(sctx->ctx, frame, w, h, 80, &jpeg, &jpeg_size);
+            ret = jpeg_encode_annotated(sctx->ctx, frame, w, h, 80, &jpeg_ptr, &jpeg_size);
         } else {
-            ret = jpeg_encode(frame, w, h, 80, &jpeg, &jpeg_size);
+            ret = jpeg_encode(frame, w, h, 80, &jpeg_ptr, &jpeg_size);
         }
 
-        if (ret != CIRA_OK || !jpeg || jpeg_size == 0) {
+        if (ret != CIRA_OK || !jpeg_ptr || jpeg_size == 0) {
             usleep(10000);
             return 0;
         }
 
-        sctx->jpeg_data = jpeg;
+        /* Copy JPEG data to our own buffer (encoder uses shared buffer) */
+        sctx->jpeg_data = (uint8_t*)malloc(jpeg_size);
+        if (!sctx->jpeg_data) {
+            usleep(10000);
+            return 0;
+        }
+        memcpy(sctx->jpeg_data, jpeg_ptr, jpeg_size);
         sctx->jpeg_size = jpeg_size;
         sctx->jpeg_offset = 0;
         sctx->header_sent = 0;
@@ -166,7 +178,9 @@ static ssize_t stream_callback(void* cls, uint64_t pos, char* buf, size_t max) {
         buf[written++] = '\r';
         buf[written++] = '\n';
         sctx->frame_sent++;
-        sctx->jpeg_data = NULL;  /* Mark for next frame */
+        /* Free current frame and mark for next frame */
+        free(sctx->jpeg_data);
+        sctx->jpeg_data = NULL;
     }
 
     return (ssize_t)written;
@@ -176,6 +190,11 @@ static ssize_t stream_callback(void* cls, uint64_t pos, char* buf, size_t max) {
 static void stream_free_callback(void* cls) {
     stream_ctx_t* sctx = (stream_ctx_t*)cls;
     if (sctx) {
+        /* Free the copied JPEG data if any */
+        if (sctx->jpeg_data) {
+            free(sctx->jpeg_data);
+            sctx->jpeg_data = NULL;
+        }
         free(sctx);
     }
 }

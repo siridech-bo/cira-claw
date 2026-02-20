@@ -92,7 +92,8 @@ export class CiraAgent {
     const anthropicMessages: Anthropic.MessageParam[] = messages.map(msg => {
       if (msg.images && msg.images.length > 0) {
         // Message with images
-        const content: Anthropic.ContentBlockParam[] = msg.images.map(img => ({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const content: any[] = msg.images.map(img => ({
           type: 'image' as const,
           source: {
             type: 'base64' as const,
@@ -140,7 +141,7 @@ export class CiraAgent {
             const toolName = block.name;
             const toolInput = block.input as Record<string, unknown>;
 
-            logger.debug(`Executing tool: ${toolName}`, { input: toolInput });
+            logger.debug({ input: toolInput }, `Executing tool: ${toolName}`);
 
             try {
               const result = await executeToolCall(toolName, toolInput, context);

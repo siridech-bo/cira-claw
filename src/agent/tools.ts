@@ -57,7 +57,13 @@ export interface AlertsConfig {
 export interface ToolContext {
   nodeManager?: {
     getAllNodes: () => Array<{ id: string; name: string; host: string; type: string }>;
-    getNode: (id: string) => { id: string; name: string; host: string; runtime?: { port: number } } | undefined;
+    getNode: (id: string) => {
+      id: string;
+      name: string;
+      host: string;
+      runtime?: { port: number };
+      ssh?: { user?: string; port?: number; key?: string; password?: string };
+    } | undefined;
     getNodeStatus: (id: string) => { status: string; metrics?: Record<string, unknown>; inference?: Record<string, unknown> } | undefined;
     getAllStatuses: () => Array<{ id: string; status: string; metrics?: Record<string, unknown> }>;
     getSummary: () => { total: number; online: number; offline: number };
@@ -238,7 +244,7 @@ export async function executeToolCall(
   input: Record<string, unknown>,
   context?: ToolContext
 ): Promise<ToolResult> {
-  logger.debug(`Executing tool: ${toolName}`, { input });
+  logger.debug({ input }, `Executing tool: ${toolName}`);
 
   const nodeManager = context?.nodeManager;
 

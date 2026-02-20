@@ -35,10 +35,12 @@ export async function createGatewayServer(config: CiraConfig): Promise<GatewaySe
 
   // Serve static dashboard files if they exist
   const dashboardPath = path.join(process.cwd(), 'dashboard', 'dist');
-  if (fs.existsSync(dashboardPath)) {
+  const dashboardExists = fs.existsSync(dashboardPath);
+  if (dashboardExists) {
     await fastify.register(fastifyStatic, {
       root: dashboardPath,
       prefix: '/',
+      wildcard: false, // Disable wildcard to allow SPA fallback
     });
     logger.info(`Serving dashboard from ${dashboardPath}`);
   } else {
@@ -100,6 +102,20 @@ export async function createGatewayServer(config: CiraConfig): Promise<GatewaySe
       },
     };
   });
+
+  // SPA fallback: serve index.html for client-side routing
+  // This must be registered AFTER all API routes
+  if (dashboardExists) {
+    fastify.setNotFoundHandler(async (request, reply) => {
+      // Only serve index.html for non-API routes
+      if (request.url.startsWith('/api/') || request.url.startsWith('/ws') || request.url.startsWith('/chat')) {
+        reply.code(404).send({ error: 'Not Found', message: `Route ${request.method}:${request.url} not found` });
+        return;
+      }
+      // Serve index.html for SPA routes
+      return reply.sendFile('index.html');
+    });
+  }
 
   return {
     fastify,

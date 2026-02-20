@@ -455,5 +455,125 @@ export async function registerApiRoutes(
     }
   );
 
+  // =====================
+  // Utility Endpoints
+  // =====================
+
+  // Convert Darknet model to NCNN
+  fastify.post<{ Body: { sourcePath: string; targetFormat: string; darknet2ncnnPath?: string } }>(
+    '/api/utility/convert-model',
+    async (request, reply) => {
+      const { sourcePath, targetFormat, darknet2ncnnPath = 'darknet2ncnn' } = request.body;
+
+      if (!sourcePath) {
+        return reply.status(400).send({
+          error: 'Missing source path',
+          message: 'Request body must include "sourcePath"',
+        });
+      }
+
+      if (targetFormat !== 'ncnn') {
+        return reply.status(400).send({
+          error: 'Unsupported target format',
+          message: 'Only "ncnn" format is currently supported',
+        });
+      }
+
+      try {
+        const fs = await import('fs');
+        const path = await import('path');
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+
+        // Validate source directory exists
+        if (!fs.existsSync(sourcePath)) {
+          return reply.status(400).send({
+            error: 'Source path not found',
+            message: `Directory does not exist: ${sourcePath}`,
+          });
+        }
+
+        // Find .cfg and .weights files
+        const files = fs.readdirSync(sourcePath);
+        const cfgFile = files.find((f: string) => f.endsWith('.cfg'));
+        const weightsFile = files.find((f: string) => f.endsWith('.weights'));
+
+        if (!cfgFile || !weightsFile) {
+          return reply.status(400).send({
+            error: 'Invalid Darknet model',
+            message: 'Directory must contain .cfg and .weights files',
+          });
+        }
+
+        // Find labels file
+        const labelsFile = files.find((f: string) =>
+          f === 'obj.names' || f === 'labels.txt' || f.endsWith('.names')
+        );
+
+        // Create output directory
+        const modelName = path.basename(sourcePath).replace('-darknet', '');
+        const outputDir = path.join(path.dirname(sourcePath), `${modelName}-ncnn`);
+
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        const cfgPath = path.join(sourcePath, cfgFile);
+        const weightsPath = path.join(sourcePath, weightsFile);
+        const paramPath = path.join(outputDir, `${modelName}.param`);
+        const binPath = path.join(outputDir, `${modelName}.bin`);
+
+        // Run darknet2ncnn
+        const cmd = `"${darknet2ncnnPath}" "${cfgPath}" "${weightsPath}" "${paramPath}" "${binPath}"`;
+        logger.info(`Running: ${cmd}`);
+
+        await execAsync(cmd, { timeout: 120000 }); // 2 minute timeout
+
+        // Copy labels file
+        if (labelsFile) {
+          const srcLabels = path.join(sourcePath, labelsFile);
+          const dstLabels = path.join(outputDir, 'obj.names');
+          fs.copyFileSync(srcLabels, dstLabels);
+        }
+
+        // Create cira_model.json manifest
+        const manifest = {
+          name: modelName,
+          description: `Converted from Darknet: ${cfgFile}`,
+          yolo_version: cfgFile.includes('v4') ? 'yolov4' : cfgFile.includes('v3') ? 'yolov3' : 'yolov4',
+          input_size: 416, // Default, could parse from cfg
+          num_classes: 80, // Default, could count from labels
+          confidence_threshold: 0.25,
+          nms_threshold: 0.45,
+        };
+
+        fs.writeFileSync(
+          path.join(outputDir, 'cira_model.json'),
+          JSON.stringify(manifest, null, 4)
+        );
+
+        logger.info(`Model converted successfully: ${outputDir}`);
+
+        return {
+          success: true,
+          outputPath: outputDir,
+          files: {
+            param: paramPath,
+            bin: binPath,
+            manifest: path.join(outputDir, 'cira_model.json'),
+          },
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error(`Model conversion failed: ${errorMessage}`);
+        return reply.status(500).send({
+          error: 'Conversion failed',
+          message: errorMessage,
+        });
+      }
+    }
+  );
+
   logger.info('API routes registered');
 }

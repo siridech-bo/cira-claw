@@ -50,7 +50,28 @@ typedef struct {
     int input_c;
     int num_classes;
     int is_nhwc;              /* 1 if input is NHWC, 0 if NCHW */
+    ONNXTensorElementDataType input_type;  /* ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT or _FLOAT16 */
 } onnx_model_t;
+
+/* Convert float32 to float16 (IEEE 754 half-precision) */
+static uint16_t float_to_half(float value) {
+    uint32_t f = *(uint32_t*)&value;
+    uint32_t sign = (f >> 16) & 0x8000;
+    int32_t exponent = ((f >> 23) & 0xff) - 127 + 15;
+    uint32_t mantissa = f & 0x7fffff;
+
+    if (exponent <= 0) {
+        if (exponent < -10) return (uint16_t)sign;
+        mantissa = (mantissa | 0x800000) >> (1 - exponent);
+        return (uint16_t)(sign | (mantissa >> 13));
+    } else if (exponent == 0xff - 127 + 15) {
+        if (mantissa == 0) return (uint16_t)(sign | 0x7c00);  /* Inf */
+        return (uint16_t)(sign | 0x7c00 | (mantissa >> 13));  /* NaN */
+    } else if (exponent > 30) {
+        return (uint16_t)(sign | 0x7c00);  /* Overflow to Inf */
+    }
+    return (uint16_t)(sign | (exponent << 10) | (mantissa >> 13));
+}
 
 /* ============================================
  * Helper Functions
@@ -256,12 +277,19 @@ int onnx_load(cira_ctx* ctx, const char* model_path) {
         g_ort->ReleaseStatus(status);
     }
 
-    /* Get input shape */
+    /* Get input shape and type */
     OrtTypeInfo* input_type_info;
     status = g_ort->SessionGetInputTypeInfo(model->session, 0, &input_type_info);
     if (status == NULL) {
         const OrtTensorTypeAndShapeInfo* tensor_info = NULL;
         ORT_IGNORE(g_ort->CastTypeInfoToTensorInfo(input_type_info, &tensor_info));
+
+        /* Get input element type (float32 or float16) */
+        model->input_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;  /* Default to float32 */
+        ORT_IGNORE(g_ort->GetTensorElementType(tensor_info, &model->input_type));
+        if (model->input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+            fprintf(stderr, "ONNX model expects float16 input\n");
+        }
 
         size_t num_dims = 0;
         ORT_IGNORE(g_ort->GetDimensionsCount(tensor_info, &num_dims));
@@ -485,7 +513,7 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
 
     free(resized);
 
-    /* Step 3: Create input tensor with correct shape based on format */
+    /* Step 3: Create input tensor with correct shape and type */
     int64_t input_shape[4];
     if (model->is_nhwc) {
         input_shape[0] = 1;
@@ -499,19 +527,42 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
         input_shape[3] = model->input_w;
     }
     OrtValue* input_tensor = NULL;
+    void* tensor_data_to_free = input_tensor_data;
 
-    status = g_ort->CreateTensorWithDataAsOrtValue(
-        model->memory_info,
-        input_tensor_data, tensor_size * sizeof(float),
-        input_shape, 4,
-        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-        &input_tensor);
+    /* Convert to float16 if model expects it */
+    if (model->input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+        uint16_t* fp16_data = (uint16_t*)malloc(tensor_size * sizeof(uint16_t));
+        if (!fp16_data) {
+            free(input_tensor_data);
+            cira_set_error(ctx, "Failed to allocate float16 buffer");
+            return CIRA_ERROR_MEMORY;
+        }
+        for (size_t i = 0; i < tensor_size; i++) {
+            fp16_data[i] = float_to_half(input_tensor_data[i]);
+        }
+        free(input_tensor_data);
+        tensor_data_to_free = fp16_data;
+
+        status = g_ort->CreateTensorWithDataAsOrtValue(
+            model->memory_info,
+            fp16_data, tensor_size * sizeof(uint16_t),
+            input_shape, 4,
+            ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16,
+            &input_tensor);
+    } else {
+        status = g_ort->CreateTensorWithDataAsOrtValue(
+            model->memory_info,
+            input_tensor_data, tensor_size * sizeof(float),
+            input_shape, 4,
+            ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+            &input_tensor);
+    }
 
     if (status != NULL) {
         fprintf(stderr, "Failed to create input tensor: %s\n",
                 g_ort->GetErrorMessage(status));
         g_ort->ReleaseStatus(status);
-        free(input_tensor_data);
+        free(tensor_data_to_free);
         return CIRA_ERROR;
     }
 
@@ -529,7 +580,7 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
                         out_names, model->num_outputs, output_tensors);
 
     g_ort->ReleaseValue(input_tensor);
-    free(input_tensor_data);
+    free(tensor_data_to_free);
 
     if (status != NULL) {
         fprintf(stderr, "ONNX inference failed: %s\n",

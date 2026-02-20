@@ -39,7 +39,7 @@ CIRA_ENABLE_STREAMING:BOOL=ON
 CIRA_ENABLE_TENSORRT:BOOL=OFF
 
 //Enable Vulkan for NCNN
-CIRA_ENABLE_VULKAN:BOOL=OFF
+CIRA_ENABLE_VULKAN:BOOL=ON
 
 //Path to a program.
 CMAKE_ADDR2LINE:FILEPATH=C:/msys64/mingw64/bin/addr2line.exe
@@ -320,6 +320,18 @@ OpenMP_gomp_LIBRARY:FILEPATH=C:/msys64/mingw64/lib/libgomp.dll.a
 //Path to the mingwthrd library for OpenMP
 OpenMP_mingwthrd_LIBRARY:FILEPATH=C:/msys64/mingw64/lib/libmingwthrd.a
 
+//Path to a program.
+Vulkan_GLSLANG_VALIDATOR_EXECUTABLE:FILEPATH=C:/msys64/mingw64/bin/glslangValidator.exe
+
+//Path to a program.
+Vulkan_GLSLC_EXECUTABLE:FILEPATH=C:/msys64/mingw64/bin/glslc.exe
+
+//Path to a file.
+Vulkan_INCLUDE_DIR:PATH=Vulkan_INCLUDE_DIR-NOTFOUND
+
+//Path to a library.
+Vulkan_LIBRARY:FILEPATH=C:/msys64/mingw64/lib/libvulkan-1.dll.a
+
 //Value Computed by CMake
 cira_BINARY_DIR:STATIC=D:/CiRA Claw/cira-edge/runtime/build
 
@@ -529,4 +541,12 @@ OpenMP_SPECTEST_C_:INTERNAL=TRUE
 OpenMP_gomp_LIBRARY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: OpenMP_mingwthrd_LIBRARY
 OpenMP_mingwthrd_LIBRARY-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Vulkan_GLSLANG_VALIDATOR_EXECUTABLE
+Vulkan_GLSLANG_VALIDATOR_EXECUTABLE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Vulkan_GLSLC_EXECUTABLE
+Vulkan_GLSLC_EXECUTABLE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Vulkan_INCLUDE_DIR
+Vulkan_INCLUDE_DIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Vulkan_LIBRARY
+Vulkan_LIBRARY-ADVANCED:INTERNAL=1
 
