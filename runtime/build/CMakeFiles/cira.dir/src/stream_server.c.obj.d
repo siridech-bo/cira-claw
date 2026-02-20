@@ -12,6 +12,7 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: \
  C:/msys64/mingw64/include/stddef.h \
  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
  D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
+ D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h \
  C:/msys64/mingw64/include/pthread.h C:/msys64/mingw64/include/errno.h \
  C:/msys64/mingw64/include/sys/types.h \
  C:/msys64/mingw64/include/_mingw_off_t.h \
@@ -39,6 +40,9 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: \
  C:/msys64/mingw64/include/corecrt_stdio_config.h \
  C:/msys64/mingw64/include/swprintf.inl \
  C:/msys64/mingw64/include/sec_api/stdio_s.h \
+ C:/msys64/mingw64/include/dirent.h C:/msys64/mingw64/include/io.h \
+ C:/msys64/mingw64/include/sys/stat.h \
+ C:/msys64/mingw64/include/_mingw_stat64.h \
  C:/msys64/mingw64/include/microhttpd.h \
  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdarg.h \
  C:/msys64/mingw64/include/stdarg.h \

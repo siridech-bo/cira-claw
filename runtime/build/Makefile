@@ -390,6 +390,30 @@ src/stream_server.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/stream_server.c.s
 .PHONY : src/stream_server.c.s
 
+src/yolo_decoder.obj: src/yolo_decoder.c.obj
+.PHONY : src/yolo_decoder.obj
+
+# target to build an object file
+src/yolo_decoder.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/yolo_decoder.c.obj
+.PHONY : src/yolo_decoder.c.obj
+
+src/yolo_decoder.i: src/yolo_decoder.c.i
+.PHONY : src/yolo_decoder.i
+
+# target to preprocess a source file
+src/yolo_decoder.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/yolo_decoder.c.i
+.PHONY : src/yolo_decoder.c.i
+
+src/yolo_decoder.s: src/yolo_decoder.c.s
+.PHONY : src/yolo_decoder.s
+
+# target to generate assembly for a file
+src/yolo_decoder.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/yolo_decoder.c.s
+.PHONY : src/yolo_decoder.c.s
+
 test/test_ncnn.obj: test/test_ncnn.c.obj
 .PHONY : test/test_ncnn.obj
 
@@ -500,6 +524,9 @@ help:
 	@echo ... src/stream_server.obj
 	@echo ... src/stream_server.i
 	@echo ... src/stream_server.s
+	@echo ... src/yolo_decoder.obj
+	@echo ... src/yolo_decoder.i
+	@echo ... src/yolo_decoder.s
 	@echo ... test/test_ncnn.obj
 	@echo ... test/test_ncnn.i
 	@echo ... test/test_ncnn.s

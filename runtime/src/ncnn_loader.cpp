@@ -39,13 +39,6 @@
 #include <ncnn/gpu.h>
 #endif
 
-/* Detection structure for internal use */
-struct NcnnDetection {
-    float x1, y1, x2, y2;   /* Bounding box corners */
-    float confidence;
-    int label_id;
-};
-
 /* Internal NCNN model structure */
 struct ncnn_model_t {
     ncnn::Net net;
@@ -85,49 +78,6 @@ static int find_file_ext(const char* dir, const char* ext, char* out, size_t out
 
     closedir(d);
     return 0;
-}
-
-/* Helper: Compute IoU (Intersection over Union) */
-static float compute_iou(const NcnnDetection& a, const NcnnDetection& b) {
-    float inter_x1 = std::max(a.x1, b.x1);
-    float inter_y1 = std::max(a.y1, b.y1);
-    float inter_x2 = std::min(a.x2, b.x2);
-    float inter_y2 = std::min(a.y2, b.y2);
-
-    float inter_w = std::max(0.0f, inter_x2 - inter_x1);
-    float inter_h = std::max(0.0f, inter_y2 - inter_y1);
-    float inter_area = inter_w * inter_h;
-
-    float area_a = (a.x2 - a.x1) * (a.y2 - a.y1);
-    float area_b = (b.x2 - b.x1) * (b.y2 - b.y1);
-
-    return inter_area / (area_a + area_b - inter_area + 1e-6f);
-}
-
-/* Helper: Non-Maximum Suppression */
-static void nms_sorted(std::vector<NcnnDetection>& dets, float nms_thresh) {
-    std::vector<bool> suppressed(dets.size(), false);
-
-    for (size_t i = 0; i < dets.size(); i++) {
-        if (suppressed[i]) continue;
-
-        for (size_t j = i + 1; j < dets.size(); j++) {
-            if (suppressed[j]) continue;
-
-            if (compute_iou(dets[i], dets[j]) > nms_thresh) {
-                suppressed[j] = true;
-            }
-        }
-    }
-
-    /* Remove suppressed detections */
-    std::vector<NcnnDetection> result;
-    for (size_t i = 0; i < dets.size(); i++) {
-        if (!suppressed[i]) {
-            result.push_back(dets[i]);
-        }
-    }
-    dets = std::move(result);
 }
 
 /**
@@ -319,12 +269,15 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
         }
     }
 
-    /* Parse YOLO output */
+    /* Parse YOLO output using unified decoder types */
     /* Output format: [num_detections, 6] where each row is [x1, y1, x2, y2, conf, class] */
     /* Or for YOLO: [grid_h, grid_w, num_anchors * (5 + num_classes)] */
 
-    std::vector<NcnnDetection> detections;
+    std::vector<yolo_detection_t> detections;
     float conf_thresh = ctx->confidence_threshold;
+
+    fprintf(stderr, "NCNN output: w=%d, h=%d, c=%d (YOLO version: %s)\n",
+            out.w, out.h, out.c, yolo_version_name(ctx->yolo_version));
 
     /* Try to parse as detection output format */
     if (out.w == 6 || out.w == 7) {
@@ -355,13 +308,13 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
             }
 
             if (score > conf_thresh) {
-                NcnnDetection det;
+                yolo_detection_t det;
                 det.x1 = x1;
                 det.y1 = y1;
                 det.x2 = x2;
                 det.y2 = y2;
-                det.confidence = score;
-                det.label_id = label_id;
+                det.score = score;
+                det.class_id = label_id;
                 detections.push_back(det);
             }
         }
@@ -407,13 +360,13 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
                         float bw = out.channel(base + 2).row(gh)[gw];
                         float bh = out.channel(base + 3).row(gh)[gw];
 
-                        NcnnDetection det;
+                        yolo_detection_t det;
                         det.x1 = (cx - bw / 2) * scale_w;
                         det.y1 = (cy - bh / 2) * scale_h;
                         det.x2 = (cx + bw / 2) * scale_w;
                         det.y2 = (cy + bh / 2) * scale_h;
-                        det.confidence = score;
-                        det.label_id = best_class;
+                        det.score = score;
+                        det.class_id = best_class;
                         detections.push_back(det);
                     }
                 }
@@ -421,16 +374,11 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
         }
     }
 
-    /* Sort by confidence (descending) */
-    std::sort(detections.begin(), detections.end(),
-        [](const NcnnDetection& a, const NcnnDetection& b) {
-            return a.confidence > b.confidence;
-        }
-    );
-
-    /* Apply NMS */
+    /* Apply NMS using unified decoder */
     if (ctx->nms_threshold > 0 && detections.size() > 1) {
-        nms_sorted(detections, ctx->nms_threshold);
+        int count = yolo_nms(detections.data(), static_cast<int>(detections.size()),
+                            ctx->nms_threshold);
+        detections.resize(count);
     }
 
     /* Convert to cira format */
@@ -465,7 +413,7 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
         norm_h = std::max(0.0f, std::min(1.0f - norm_y, norm_h));
 
         if (!cira_add_detection(ctx, norm_x, norm_y, norm_w, norm_h,
-                                det.confidence, det.label_id)) {
+                                det.score, det.class_id)) {
             /* Detection array full */
             break;
         }

@@ -2,13 +2,19 @@
  * CiRA Runtime - Streaming Server Test
  *
  * This test starts the HTTP streaming server and runs until interrupted.
+ * Can start without a model and load one later via the API or dashboard.
  *
  * Usage:
- *   ./test_stream [port]
+ *   ./test_stream [model_path] [-p port]
+ *   ./test_stream -p 8080              # Start without model (load via dashboard)
+ *   ./test_stream ./models/yolo        # Start with model on default port
+ *   ./test_stream ./models/yolo -p 9000
  *
  * Then visit:
  *   http://localhost:8080/health
  *   http://localhost:8080/api/results
+ *   http://localhost:8080/api/models   # List available models
+ *   POST /api/model                    # Switch model at runtime
  *
  * (c) CiRA Robotics / KMITL 2026
  */
@@ -16,6 +22,7 @@
 #include "cira.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <signal.h>
 
 #ifdef _WIN32
@@ -42,18 +49,25 @@ int main(int argc, char* argv[]) {
 
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
-        if (argv[i][0] == '-') {
-            /* Skip flags */
-        } else if (model_path == NULL) {
-            /* First non-flag arg is model path */
-            model_path = argv[i];
-        } else {
-            /* Second non-flag arg is port */
-            port = atoi(argv[i]);
-            if (port <= 0 || port > 65535) {
-                fprintf(stderr, "Invalid port: %s\n", argv[i]);
-                return 1;
+        if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) {
+            if (i + 1 < argc) {
+                port = atoi(argv[++i]);
+                if (port <= 0 || port > 65535) {
+                    fprintf(stderr, "Invalid port: %d\n", port);
+                    return 1;
+                }
             }
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("Usage: %s [model_path] [-p port]\n", argv[0]);
+            printf("  model_path   Path to model directory (optional, can load later via API)\n");
+            printf("  -p, --port   HTTP server port (default: 8080)\n");
+            printf("\nExample:\n");
+            printf("  %s -p 8080                    # Start without model\n", argv[0]);
+            printf("  %s ./models/yolo -p 8080     # Start with model\n", argv[0]);
+            return 0;
+        } else if (argv[i][0] != '-') {
+            /* Positional arg is model path */
+            model_path = argv[i];
         }
     }
 

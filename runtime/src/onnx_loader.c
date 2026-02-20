@@ -52,13 +52,6 @@ typedef struct {
     int is_nhwc;              /* 1 if input is NHWC, 0 if NCHW */
 } onnx_model_t;
 
-/* Detection structure for NMS */
-typedef struct {
-    float x1, y1, x2, y2;   /* Bounding box corners (normalized) */
-    float confidence;
-    int label_id;
-} onnx_detection_t;
-
 /* ============================================
  * Helper Functions
  * ============================================ */
@@ -128,71 +121,6 @@ static void bilinear_resize(const uint8_t* src, int src_w, int src_h,
             }
         }
     }
-}
-
-/* Compute IoU (Intersection over Union) */
-static float compute_iou(const onnx_detection_t* a, const onnx_detection_t* b) {
-    float inter_x1 = a->x1 > b->x1 ? a->x1 : b->x1;
-    float inter_y1 = a->y1 > b->y1 ? a->y1 : b->y1;
-    float inter_x2 = a->x2 < b->x2 ? a->x2 : b->x2;
-    float inter_y2 = a->y2 < b->y2 ? a->y2 : b->y2;
-
-    float inter_w = inter_x2 - inter_x1;
-    float inter_h = inter_y2 - inter_y1;
-    if (inter_w < 0) inter_w = 0;
-    if (inter_h < 0) inter_h = 0;
-    float inter_area = inter_w * inter_h;
-
-    float area_a = (a->x2 - a->x1) * (a->y2 - a->y1);
-    float area_b = (b->x2 - b->x1) * (b->y2 - b->y1);
-
-    return inter_area / (area_a + area_b - inter_area + 1e-6f);
-}
-
-/* Comparison function for qsort (descending by confidence) */
-static int detection_compare(const void* a, const void* b) {
-    const onnx_detection_t* da = (const onnx_detection_t*)a;
-    const onnx_detection_t* db = (const onnx_detection_t*)b;
-    if (da->confidence > db->confidence) return -1;
-    if (da->confidence < db->confidence) return 1;
-    return 0;
-}
-
-/* Non-Maximum Suppression (pure C implementation) */
-static int nms_detections(onnx_detection_t* dets, int count, float nms_thresh) {
-    if (count <= 1) return count;
-
-    /* Sort by confidence descending */
-    qsort(dets, count, sizeof(onnx_detection_t), detection_compare);
-
-    /* Allocate suppression flags */
-    int* suppressed = (int*)calloc(count, sizeof(int));
-    if (!suppressed) return count;
-
-    int result_count = 0;
-
-    for (int i = 0; i < count; i++) {
-        if (suppressed[i]) continue;
-
-        /* Keep this detection */
-        if (i != result_count) {
-            dets[result_count] = dets[i];
-        }
-        result_count++;
-
-        /* Suppress overlapping detections */
-        for (int j = i + 1; j < count; j++) {
-            if (suppressed[j]) continue;
-
-            /* Only suppress same class or all classes if doing class-agnostic NMS */
-            if (compute_iou(&dets[i], &dets[j]) > nms_thresh) {
-                suppressed[j] = 1;
-            }
-        }
-    }
-
-    free(suppressed);
-    return result_count;
 }
 
 /* Clamp value to range */
@@ -610,11 +538,10 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
         return CIRA_ERROR;
     }
 
-    /* Step 5: Process all output tensors */
-    float conf_thresh = ctx->confidence_threshold;
-    int max_detections = CIRA_MAX_DETECTIONS * 4;  /* Pre-NMS buffer */
-    onnx_detection_t* detections = (onnx_detection_t*)malloc(max_detections * sizeof(onnx_detection_t));
-    int num_detections = 0;
+    /* Step 5: Process all output tensors using unified YOLO decoder */
+    int max_dets_buffer = CIRA_MAX_DETECTIONS * 4;  /* Pre-NMS buffer */
+    yolo_detection_t* detections = (yolo_detection_t*)malloc(max_dets_buffer * sizeof(yolo_detection_t));
+    int total_detections = 0;
 
     if (!detections) {
         for (size_t i = 0; i < model->num_outputs; i++) {
@@ -622,6 +549,20 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
         }
         return CIRA_ERROR_MEMORY;
     }
+
+    /* Setup decoder config */
+    yolo_decode_config_t decode_config;
+    decode_config.version = ctx->yolo_version;
+    decode_config.input_w = model->input_w;
+    decode_config.input_h = model->input_h;
+    decode_config.num_classes = model->num_classes;
+    decode_config.conf_threshold = ctx->confidence_threshold;
+    decode_config.nms_threshold = ctx->nms_threshold;
+    decode_config.max_detections = CIRA_MAX_DETECTIONS;
+
+    fprintf(stderr, "YOLO decoder: version=%s, input=%dx%d, classes=%d\n",
+            yolo_version_name(decode_config.version),
+            decode_config.input_w, decode_config.input_h, decode_config.num_classes);
 
     /* Process each output scale */
     for (size_t out_idx = 0; out_idx < model->num_outputs; out_idx++) {
@@ -631,369 +572,76 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
         status = g_ort->GetTensorMutableData(output_tensors[out_idx], (void**)&output_data);
         if (status != NULL) {
             g_ort->ReleaseStatus(status);
-            continue;  /* Skip this output */
+            continue;
         }
 
-        /* Get output shape for parsing */
+        /* Get output shape */
         OrtTensorTypeAndShapeInfo* output_info = NULL;
         ORT_IGNORE(g_ort->GetTensorTypeAndShape(output_tensors[out_idx], &output_info));
 
-    size_t num_dims = 0;
-    size_t total_elements = 0;
-    int64_t output_shape[6] = {0};
+        size_t num_dims = 0;
+        int64_t output_shape[6] = {0};
 
-    if (output_info) {
-        ORT_IGNORE(g_ort->GetDimensionsCount(output_info, &num_dims));
-        ORT_IGNORE(g_ort->GetTensorShapeElementCount(output_info, &total_elements));
-
-        if (num_dims <= 6) {
-            ORT_IGNORE(g_ort->GetDimensions(output_info, output_shape, num_dims));
-        }
-        g_ort->ReleaseTensorTypeAndShapeInfo(output_info);
-    }
-
-    /* Debug: print output shape and sample values */
-    fprintf(stderr, "ONNX output: dims=%zu, elements=%zu, shape=[", num_dims, total_elements);
-    for (size_t i = 0; i < num_dims && i < 6; i++) {
-        fprintf(stderr, "%lld%s", (long long)output_shape[i], i < num_dims - 1 ? ", " : "");
-    }
-    fprintf(stderr, "]\n");
-
-    /* Print first few output values for debugging */
-    if (total_elements > 0) {
-        fprintf(stderr, "  First 10 values: ");
-        for (size_t i = 0; i < 10 && i < total_elements; i++) {
-            fprintf(stderr, "%.3f ", output_data[i]);
-        }
-        fprintf(stderr, "\n");
-    }
-
-        /* Determine output format and parse */
-    if (num_dims == 3) {
-        /* Shape: [batch, num_boxes, values_per_box] */
-        int64_t num_boxes = output_shape[1];
-        int64_t values_per_box = output_shape[2];
-
-        if (values_per_box == 6) {
-            /* Format A: [class_id, score, x1, y1, x2, y2] */
-            for (int64_t i = 0; i < num_boxes && num_detections < max_detections; i++) {
-                const float* row = output_data + i * 6;
-                int label_id = (int)row[0];
-                float score = row[1];
-
-                if (score > conf_thresh && label_id >= 0 && label_id < model->num_classes) {
-                    float x1 = row[2];
-                    float y1 = row[3];
-                    float x2 = row[4];
-                    float y2 = row[5];
-
-                    /* Normalize if in pixel coordinates */
-                    if (x2 > 1.0f || y2 > 1.0f) {
-                        x1 /= model->input_w;
-                        y1 /= model->input_h;
-                        x2 /= model->input_w;
-                        y2 /= model->input_h;
-                    }
-
-                    detections[num_detections].x1 = clamp_f(x1, 0.0f, 1.0f);
-                    detections[num_detections].y1 = clamp_f(y1, 0.0f, 1.0f);
-                    detections[num_detections].x2 = clamp_f(x2, 0.0f, 1.0f);
-                    detections[num_detections].y2 = clamp_f(y2, 0.0f, 1.0f);
-                    detections[num_detections].confidence = score;
-                    detections[num_detections].label_id = label_id;
-                    num_detections++;
-                }
+        if (output_info) {
+            ORT_IGNORE(g_ort->GetDimensionsCount(output_info, &num_dims));
+            if (num_dims <= 6) {
+                ORT_IGNORE(g_ort->GetDimensions(output_info, output_shape, num_dims));
             }
+            g_ort->ReleaseTensorTypeAndShapeInfo(output_info);
         }
-        else if (values_per_box == 7) {
-            /* Format B: [batch_id, class_id, score, x1, y1, x2, y2] */
-            for (int64_t i = 0; i < num_boxes && num_detections < max_detections; i++) {
-                const float* row = output_data + i * 7;
-                int label_id = (int)row[1];
-                float score = row[2];
 
-                if (score > conf_thresh && label_id >= 0 && label_id < model->num_classes) {
-                    float x1 = row[3];
-                    float y1 = row[4];
-                    float x2 = row[5];
-                    float y2 = row[6];
-
-                    /* Normalize if in pixel coordinates */
-                    if (x2 > 1.0f || y2 > 1.0f) {
-                        x1 /= model->input_w;
-                        y1 /= model->input_h;
-                        x2 /= model->input_w;
-                        y2 /= model->input_h;
-                    }
-
-                    detections[num_detections].x1 = clamp_f(x1, 0.0f, 1.0f);
-                    detections[num_detections].y1 = clamp_f(y1, 0.0f, 1.0f);
-                    detections[num_detections].x2 = clamp_f(x2, 0.0f, 1.0f);
-                    detections[num_detections].y2 = clamp_f(y2, 0.0f, 1.0f);
-                    detections[num_detections].confidence = score;
-                    detections[num_detections].label_id = label_id;
-                    num_detections++;
-                }
-            }
+        /* Debug output */
+        fprintf(stderr, "ONNX output[%zu]: dims=%zu, shape=[", out_idx, num_dims);
+        for (size_t i = 0; i < num_dims && i < 6; i++) {
+            fprintf(stderr, "%lld%s", (long long)output_shape[i], i < num_dims - 1 ? ", " : "");
         }
-        else if (values_per_box >= 5 + model->num_classes) {
-            /* Format C: [cx, cy, w, h, obj_conf, class_probs...] (YOLOv4/v7 raw) */
-            int num_classes = model->num_classes;
+        fprintf(stderr, "]\n");
 
-            for (int64_t i = 0; i < num_boxes && num_detections < max_detections; i++) {
-                const float* row = output_data + i * values_per_box;
+        /* Decode this output scale */
+        int space_left = max_dets_buffer - total_detections;
+        if (space_left <= 0) break;
 
-                float obj_conf = row[4];
-                if (obj_conf < conf_thresh) continue;
+        int count = yolo_decode(output_data, output_shape, (int)num_dims,
+                               &decode_config,
+                               detections + total_detections, space_left);
 
-                /* Find best class */
-                int best_class = 0;
-                float best_prob = 0;
-                for (int c = 0; c < num_classes; c++) {
-                    float prob = row[5 + c];
-                    if (prob > best_prob) {
-                        best_prob = prob;
-                        best_class = c;
-                    }
-                }
-
-                float score = obj_conf * best_prob;
-                if (score < conf_thresh) continue;
-
-                /* Get box (center format) */
-                float cx = row[0];
-                float cy = row[1];
-                float bw = row[2];
-                float bh = row[3];
-
-                /* Normalize if in pixel coordinates */
-                if (cx > 1.0f || cy > 1.0f || bw > 1.0f || bh > 1.0f) {
-                    cx /= model->input_w;
-                    cy /= model->input_h;
-                    bw /= model->input_w;
-                    bh /= model->input_h;
-                }
-
-                /* Convert center to corners */
-                float x1 = cx - bw / 2.0f;
-                float y1 = cy - bh / 2.0f;
-                float x2 = cx + bw / 2.0f;
-                float y2 = cy + bh / 2.0f;
-
-                detections[num_detections].x1 = clamp_f(x1, 0.0f, 1.0f);
-                detections[num_detections].y1 = clamp_f(y1, 0.0f, 1.0f);
-                detections[num_detections].x2 = clamp_f(x2, 0.0f, 1.0f);
-                detections[num_detections].y2 = clamp_f(y2, 0.0f, 1.0f);
-                detections[num_detections].confidence = score;
-                detections[num_detections].label_id = best_class;
-                num_detections++;
-            }
+        if (count > 0) {
+            fprintf(stderr, "  Scale %zu: %d detections\n", out_idx, count);
+            total_detections += count;
         }
     }
-    else if (num_dims == 2) {
-        /* Shape: [num_boxes, values_per_box] - same formats as above */
-        int64_t num_boxes = output_shape[0];
-        int64_t values_per_box = output_shape[1];
-
-        if (values_per_box == 6) {
-            /* Format A */
-            for (int64_t i = 0; i < num_boxes && num_detections < max_detections; i++) {
-                const float* row = output_data + i * 6;
-                int label_id = (int)row[0];
-                float score = row[1];
-
-                if (score > conf_thresh && label_id >= 0 && label_id < model->num_classes) {
-                    float x1 = row[2], y1 = row[3], x2 = row[4], y2 = row[5];
-                    if (x2 > 1.0f || y2 > 1.0f) {
-                        x1 /= model->input_w; y1 /= model->input_h;
-                        x2 /= model->input_w; y2 /= model->input_h;
-                    }
-
-                    detections[num_detections].x1 = clamp_f(x1, 0.0f, 1.0f);
-                    detections[num_detections].y1 = clamp_f(y1, 0.0f, 1.0f);
-                    detections[num_detections].x2 = clamp_f(x2, 0.0f, 1.0f);
-                    detections[num_detections].y2 = clamp_f(y2, 0.0f, 1.0f);
-                    detections[num_detections].confidence = score;
-                    detections[num_detections].label_id = label_id;
-                    num_detections++;
-                }
-            }
-        }
-    }
-    else if (num_dims == 5) {
-        /* 5D output: raw YOLO grid format */
-        /* Could be [batch, grid_h, grid_w, anchors, values] or [batch, anchors, grid_h, grid_w, values] */
-        int64_t grid_h, grid_w, num_anchors, values_per_anchor;
-
-        /* Detect layout based on typical values */
-        if (output_shape[4] >= 5) {
-            /* Last dim is values: [batch, ?, ?, ?, values] */
-            values_per_anchor = output_shape[4];
-
-            /* Check if shape[1] is small (anchors) or large (grid) */
-            if (output_shape[1] <= 9) {
-                /* [batch, anchors, grid_h, grid_w, values] */
-                num_anchors = output_shape[1];
-                grid_h = output_shape[2];
-                grid_w = output_shape[3];
-            } else {
-                /* [batch, grid_h, grid_w, anchors, values] */
-                grid_h = output_shape[1];
-                grid_w = output_shape[2];
-                num_anchors = output_shape[3];
-            }
-
-            int num_classes = model->num_classes;
-            if (values_per_anchor >= 5 + num_classes) {
-                fprintf(stderr, "5D output: grid=%lldx%lld, anchors=%lld, values=%lld (raw YOLO)\n",
-                        (long long)grid_h, (long long)grid_w, (long long)num_anchors, (long long)values_per_anchor);
-
-                /* YOLOv4 anchors for 416x416 (normalized by 416) */
-                /* Scale 52x52 uses anchors 0-2, 26x26 uses 3-5, 13x13 uses 6-8 */
-                static const float anchors_w[9] = {10.f/416, 16.f/416, 33.f/416, 30.f/416, 62.f/416, 59.f/416, 116.f/416, 156.f/416, 373.f/416};
-                static const float anchors_h[9] = {13.f/416, 30.f/416, 23.f/416, 61.f/416, 45.f/416, 119.f/416, 90.f/416, 198.f/416, 326.f/416};
-
-                /* Determine anchor offset based on grid size */
-                int anchor_offset = 0;
-                if (grid_h == 52) anchor_offset = 0;       /* Small objects */
-                else if (grid_h == 26) anchor_offset = 3;  /* Medium objects */
-                else if (grid_h == 13) anchor_offset = 6;  /* Large objects */
-
-                /* First pass: find max objectness to detect if output is activated */
-                float max_obj_raw = -1e9f;
-                float max_obj_activated = 0;
-                int64_t max_gh = 0, max_gw = 0, max_a = 0;
-
-                for (int64_t gh = 0; gh < grid_h; gh++) {
-                    for (int64_t gw = 0; gw < grid_w; gw++) {
-                        for (int64_t a = 0; a < num_anchors; a++) {
-                            int64_t offset = ((gh * grid_w + gw) * num_anchors + a) * values_per_anchor;
-                            float raw_obj = output_data[offset + 4];
-                            if (raw_obj > max_obj_raw) {
-                                max_obj_raw = raw_obj;
-                                max_gh = gh; max_gw = gw; max_a = a;
-                            }
-                        }
-                    }
-                }
-                max_obj_activated = 1.0f / (1.0f + expf(-max_obj_raw));
-
-                /* Detect if output is already activated (values bounded 0-1) or raw logits */
-                int is_activated = (max_obj_raw <= 1.0f && max_obj_raw >= 0.0f);
-
-                fprintf(stderr, "Max obj_conf: raw=%.4f, sigmoid=%.4f at [%lld,%lld,a%lld], %s\n",
-                        max_obj_raw, max_obj_activated, (long long)max_gh, (long long)max_gw, (long long)max_a,
-                        is_activated ? "ACTIVATED" : "RAW");
-
-                /* Parse all grid cells */
-                for (int64_t gh = 0; gh < grid_h && num_detections < max_detections; gh++) {
-                    for (int64_t gw = 0; gw < grid_w && num_detections < max_detections; gw++) {
-                        for (int64_t a = 0; a < num_anchors && num_detections < max_detections; a++) {
-                            /* Calculate offset for [batch, grid_h, grid_w, anchors, values] */
-                            int64_t offset = ((gh * grid_w + gw) * num_anchors + a) * values_per_anchor;
-                            const float* cell = output_data + offset;
-
-                            /* Get objectness - apply sigmoid only if output is raw logits */
-                            float obj_conf;
-                            if (is_activated) {
-                                obj_conf = cell[4];  /* Already activated */
-                            } else {
-                                obj_conf = 1.0f / (1.0f + expf(-cell[4]));  /* Apply sigmoid */
-                            }
-                            if (obj_conf < conf_thresh) continue;
-
-                            /* Find best class */
-                            int best_class = 0;
-                            float best_prob = 0;
-                            for (int c = 0; c < num_classes; c++) {
-                                float prob;
-                                if (is_activated) {
-                                    prob = cell[5 + c];  /* Already activated */
-                                } else {
-                                    prob = 1.0f / (1.0f + expf(-cell[5 + c]));  /* Apply sigmoid */
-                                }
-                                if (prob > best_prob) {
-                                    best_prob = prob;
-                                    best_class = c;
-                                }
-                            }
-
-                            float score = obj_conf * best_prob;
-                            if (score < conf_thresh) continue;
-
-                            /* Decode box coordinates */
-                            float cx, cy, bw, bh;
-                            int anchor_idx = anchor_offset + (int)a;
-                            if (anchor_idx >= 9) anchor_idx = (int)a % 3;
-
-                            if (is_activated) {
-                                /* TensorFlow YOLO: boxes might be in different format */
-                                /* Try: cx,cy already normalized (0-1), w,h as fraction of image */
-                                cx = cell[0];
-                                cy = cell[1];
-                                bw = cell[2];
-                                bh = cell[3];
-                                /* If values are grid-relative, convert */
-                                if (cx <= 1.0f && cy <= 1.0f) {
-                                    /* Values seem to be offsets within cell, convert to absolute */
-                                    cx = (gw + cx) / grid_w;
-                                    cy = (gh + cy) / grid_h;
-                                }
-                            } else {
-                                /* Raw YOLO: cx,cy = sigmoid offset, w,h = exp * anchor */
-                                cx = (1.0f / (1.0f + expf(-cell[0])) + gw) / grid_w;
-                                cy = (1.0f / (1.0f + expf(-cell[1])) + gh) / grid_h;
-                                bw = expf(cell[2]) * anchors_w[anchor_idx];
-                                bh = expf(cell[3]) * anchors_h[anchor_idx];
-                            }
-
-                            /* Convert center to corners */
-                            float x1 = cx - bw / 2.0f;
-                            float y1 = cy - bh / 2.0f;
-                            float x2 = cx + bw / 2.0f;
-                            float y2 = cy + bh / 2.0f;
-
-                            detections[num_detections].x1 = clamp_f(x1, 0.0f, 1.0f);
-                            detections[num_detections].y1 = clamp_f(y1, 0.0f, 1.0f);
-                            detections[num_detections].x2 = clamp_f(x2, 0.0f, 1.0f);
-                            detections[num_detections].y2 = clamp_f(y2, 0.0f, 1.0f);
-                            detections[num_detections].confidence = score;
-                            detections[num_detections].label_id = best_class;
-                            num_detections++;
-                        }
-                    }
-                }
-            }
-        }
-    }
-        else if (num_dims == 0 && total_elements > 0) {
-            /* Fallback: try to infer format from total element count */
-            fprintf(stderr, "Unknown output format, trying heuristics with %zu elements\n", total_elements);
-        }
-    }  /* End of output loop */
 
     /* Release all output tensors */
     for (size_t i = 0; i < model->num_outputs; i++) {
         if (output_tensors[i]) g_ort->ReleaseValue(output_tensors[i]);
     }
 
-    /* Step 7: Apply NMS */
-    if (ctx->nms_threshold > 0 && num_detections > 1) {
-        num_detections = nms_detections(detections, num_detections, ctx->nms_threshold);
+    /* Step 6: Apply NMS across all scales (decoder already applied per-scale NMS) */
+    if (ctx->nms_threshold > 0 && total_detections > 1) {
+        total_detections = yolo_nms(detections, total_detections, ctx->nms_threshold);
     }
 
-    /* Step 8: Add detections to context (convert corners to x,y,w,h format) */
-    for (int i = 0; i < num_detections; i++) {
-        /* Convert from corner format to top-left + size format */
-        float x = detections[i].x1;
-        float y = detections[i].y1;
-        float bw = detections[i].x2 - detections[i].x1;
-        float bh = detections[i].y2 - detections[i].y1;
+    /* Step 7: Add detections to context (convert to normalized x,y,w,h format) */
+    for (int i = 0; i < total_detections; i++) {
+        /* Normalize pixel coords to 0-1 */
+        float x1 = detections[i].x1 / model->input_w;
+        float y1 = detections[i].y1 / model->input_h;
+        float x2 = detections[i].x2 / model->input_w;
+        float y2 = detections[i].y2 / model->input_h;
 
-        if (!cira_add_detection(ctx, x, y, bw, bh,
-                                detections[i].confidence, detections[i].label_id)) {
-            /* Detection array full */
-            break;
+        /* Clamp to valid range */
+        x1 = clamp_f(x1, 0.0f, 1.0f);
+        y1 = clamp_f(y1, 0.0f, 1.0f);
+        x2 = clamp_f(x2, 0.0f, 1.0f);
+        y2 = clamp_f(y2, 0.0f, 1.0f);
+
+        /* Convert corners to top-left + size */
+        float bw = x2 - x1;
+        float bh = y2 - y1;
+
+        if (!cira_add_detection(ctx, x1, y1, bw, bh,
+                                detections[i].score, detections[i].class_id)) {
+            break;  /* Detection array full */
         }
     }
 

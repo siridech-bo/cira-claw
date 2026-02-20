@@ -1,0 +1,17 @@
+{
+    "name": "YOLOv4-tiny Defect Detection",
+    "description": "Custom trained YOLO model for manufacturing defect detection",
+    "version": "1.0.0",
+
+    "yolo_version": "yolov4",
+
+    "input_size": 416,
+
+    "num_classes": 3,
+    "class_names": ["scratch", "dent", "crack"],
+
+    "confidence_threshold": 0.5,
+    "nms_threshold": 0.4,
+
+    "notes": "Supported yolo_version values: auto, yolov3, yolov4, yolov5, yolov7, yolov8, yolov9, yolov10, yolov11"
+}

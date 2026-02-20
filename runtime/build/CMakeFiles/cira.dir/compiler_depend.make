@@ -45,7 +45,8 @@ CMakeFiles/cira.dir/src/annotator.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/ann
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdint.h \
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
-  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h
+  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h
 
 CMakeFiles/cira.dir/src/camera.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src/camera.cpp \
   C:/msys64/mingw64/include/_bsd_types.h \
@@ -536,7 +537,8 @@ CMakeFiles/cira.dir/src/camera.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src/came
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xsavesintrin.h \
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xtestintrin.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
-  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h
+  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h
 
 CMakeFiles/cira.dir/src/cira.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/cira.c \
   C:/msys64/mingw64/include/_mingw.h \
@@ -590,7 +592,8 @@ CMakeFiles/cira.dir/src/cira.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/cira.c \
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdint.h \
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
-  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h
+  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h
 
 CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src/jpeg_encoder.cpp \
   C:/msys64/mingw64/include/_mingw.h \
@@ -822,7 +825,8 @@ CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/sr
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h \
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xmmintrin.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
-  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h
+  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h
 
 CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src/ncnn_loader.cpp \
   C:/msys64/mingw64/include/_mingw.h \
@@ -1178,7 +1182,8 @@ CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj: D:/CiRA\ Claw/cira-edge/runtime/src
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xsavesintrin.h \
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xtestintrin.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
-  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h
+  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h
 
 CMakeFiles/cira.dir/src/onnx_loader.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/onnx_loader.c \
   C:/msys64/mingw64/include/_mingw.h \
@@ -1234,6 +1239,7 @@ CMakeFiles/cira.dir/src/onnx_loader.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/o
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h \
   D:/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h
 
 CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/stream_server.c \
@@ -1242,6 +1248,7 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src
   C:/msys64/mingw64/include/_mingw_mac.h \
   C:/msys64/mingw64/include/_mingw_off_t.h \
   C:/msys64/mingw64/include/_mingw_secapi.h \
+  C:/msys64/mingw64/include/_mingw_stat64.h \
   C:/msys64/mingw64/include/_mingw_stdarg.h \
   C:/msys64/mingw64/include/_mingw_unicode.h \
   C:/msys64/mingw64/include/_timeval.h \
@@ -1269,6 +1276,7 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src
   C:/msys64/mingw64/include/dde.h \
   C:/msys64/mingw64/include/ddeml.h \
   C:/msys64/mingw64/include/debugapi.h \
+  C:/msys64/mingw64/include/dirent.h \
   C:/msys64/mingw64/include/dlgs.h \
   C:/msys64/mingw64/include/dpapi.h \
   C:/msys64/mingw64/include/driverspecs.h \
@@ -1285,6 +1293,7 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src
   C:/msys64/mingw64/include/in6addr.h \
   C:/msys64/mingw64/include/inaddr.h \
   C:/msys64/mingw64/include/interlockedapi.h \
+  C:/msys64/mingw64/include/io.h \
   C:/msys64/mingw64/include/ioapiset.h \
   C:/msys64/mingw64/include/jobapi.h \
   C:/msys64/mingw64/include/joystickapi.h \
@@ -1380,6 +1389,7 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src
   C:/msys64/mingw64/include/stringapiset.h \
   C:/msys64/mingw64/include/swprintf.inl \
   C:/msys64/mingw64/include/synchapi.h \
+  C:/msys64/mingw64/include/sys/stat.h \
   C:/msys64/mingw64/include/sys/timeb.h \
   C:/msys64/mingw64/include/sys/types.h \
   C:/msys64/mingw64/include/sysinfoapi.h \
@@ -1551,7 +1561,41 @@ CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xsavesintrin.h \
   C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xtestintrin.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
-  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h
+  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h
+
+CMakeFiles/cira.dir/src/yolo_decoder.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/yolo_decoder.c \
+  C:/msys64/mingw64/include/_mingw.h \
+  C:/msys64/mingw64/include/_mingw_mac.h \
+  C:/msys64/mingw64/include/_mingw_off_t.h \
+  C:/msys64/mingw64/include/_mingw_secapi.h \
+  C:/msys64/mingw64/include/corecrt.h \
+  C:/msys64/mingw64/include/corecrt_stdio_config.h \
+  C:/msys64/mingw64/include/corecrt_wctype.h \
+  C:/msys64/mingw64/include/corecrt_wstdlib.h \
+  C:/msys64/mingw64/include/crtdefs.h \
+  C:/msys64/mingw64/include/ctype.h \
+  C:/msys64/mingw64/include/errno.h \
+  C:/msys64/mingw64/include/limits.h \
+  C:/msys64/mingw64/include/malloc.h \
+  C:/msys64/mingw64/include/math.h \
+  C:/msys64/mingw64/include/sdks/_mingw_ddk.h \
+  C:/msys64/mingw64/include/sec_api/stdio_s.h \
+  C:/msys64/mingw64/include/sec_api/stdlib_s.h \
+  C:/msys64/mingw64/include/sec_api/string_s.h \
+  C:/msys64/mingw64/include/stddef.h \
+  C:/msys64/mingw64/include/stdint.h \
+  C:/msys64/mingw64/include/stdio.h \
+  C:/msys64/mingw64/include/stdlib.h \
+  C:/msys64/mingw64/include/string.h \
+  C:/msys64/mingw64/include/swprintf.inl \
+  C:/msys64/mingw64/include/vadefs.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/limits.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/mm_malloc.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stddef.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdint.h \
+  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h \
+  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h
 
 
 C:/msys64/mingw64/include/ws2ipdef.h:
@@ -1932,10 +1976,6 @@ C:/msys64/mingw64/include/c++/15.2.0/bits/stl_iterator.h:
 
 C:/msys64/mingw64/include/c++/15.2.0/concepts:
 
-C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/enqcmdintrin.h:
-
-C:/msys64/mingw64/include/c++/15.2.0/bits/shared_ptr_base.h:
-
 C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx512bitalgintrin.h:
 
 C:/msys64/mingw64/include/c++/15.2.0/bits/shared_ptr_atomic.h:
@@ -2050,6 +2090,16 @@ C:/msys64/mingw64/include/c++/15.2.0/backward/binders.h:
 
 C:/msys64/mingw64/include/c++/15.2.0/bits/std_abs.h:
 
+C:/msys64/mingw64/include/c++/15.2.0/bits/ostream_insert.h:
+
+C:/msys64/mingw64/include/c++/15.2.0/bits/locale_facets.h:
+
+C:/msys64/mingw64/include/c++/15.2.0/backward/auto_ptr.h:
+
+C:/msys64/mingw64/include/c++/15.2.0/bits/move.h:
+
+C:/msys64/mingw64/include/c++/15.2.0/bits/ios_base.h:
+
 C:/msys64/mingw64/include/c++/15.2.0/bits/hash_bytes.h:
 
 C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/tmmintrin.h:
@@ -2086,9 +2136,17 @@ C:/msys64/mingw64/include/winspool.h:
 
 C:/msys64/mingw64/include/c++/15.2.0/array:
 
+D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h:
+
 C:/msys64/mingw64/include/c++/15.2.0/bits/cxxabi_init_exception.h:
 
 C:/msys64/mingw64/include/sec_api/sys/timeb_s.h:
+
+C:/msys64/mingw64/include/opencv4/opencv2/core/base.hpp:
+
+C:/msys64/mingw64/include/_timeval.h:
+
+C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h:
 
 C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/avx10_2-512bf16intrin.h:
 
@@ -2192,23 +2250,9 @@ C:/msys64/mingw64/include/c++/15.2.0/bits/sstream.tcc:
 
 C:/msys64/mingw64/include/apiset.h:
 
-C:/msys64/mingw64/include/c++/15.2.0/bits/stl_tempbuf.h:
-
-C:/msys64/mingw64/include/cguid.h:
-
 C:/msys64/mingw64/include/_mingw_secapi.h:
 
 C:/msys64/mingw64/include/ddeml.h:
-
-C:/msys64/mingw64/include/opencv4/opencv2/core/base.hpp:
-
-C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/syslimits.h:
-
-C:/msys64/mingw64/include/_timeval.h:
-
-C:/msys64/mingw64/include/c++/15.2.0/bits/ostream_insert.h:
-
-C:/msys64/mingw64/include/c++/15.2.0/bits/locale_facets.h:
 
 C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/lzcntintrin.h:
 
@@ -2274,6 +2318,8 @@ C:/msys64/mingw64/include/c++/15.2.0/bits/istream.tcc:
 
 C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/mm_malloc.h:
 
+D:/CiRA\ Claw/cira-edge/runtime/src/yolo_decoder.c:
+
 C:/msys64/mingw64/include/sys/timeb.h:
 
 C:/msys64/mingw64/include/ncnn/allocator.h:
@@ -2289,6 +2335,10 @@ C:/msys64/mingw64/include/pthread_unistd.h:
 C:/msys64/mingw64/include/minwinbase.h:
 
 D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h:
+
+C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/enqcmdintrin.h:
+
+C:/msys64/mingw64/include/c++/15.2.0/bits/shared_ptr_base.h:
 
 D:/CiRA\ Claw/cira-edge/runtime/src/camera.cpp:
 
@@ -2332,12 +2382,6 @@ C:/msys64/mingw64/include/wctype.h:
 
 C:/msys64/mingw64/include/apisetcconv.h:
 
-C:/msys64/mingw64/include/c++/15.2.0/bits/move.h:
-
-C:/msys64/mingw64/include/c++/15.2.0/bits/ios_base.h:
-
-C:/msys64/mingw64/include/c++/15.2.0/backward/auto_ptr.h:
-
 C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/wbnoinvdintrin.h:
 
 C:/msys64/mingw64/include/assert.h:
@@ -2355,6 +2399,10 @@ C:/msys64/mingw64/include/c++/15.2.0/bits/charconv.h:
 C:/msys64/mingw64/include/c++/15.2.0/bits/atomic_base.h:
 
 C:/msys64/mingw64/include/corecrt.h:
+
+C:/msys64/mingw64/include/c++/15.2.0/bits/stl_tempbuf.h:
+
+C:/msys64/mingw64/include/cguid.h:
 
 C:/msys64/mingw64/include/c++/15.2.0/bits/stl_uninitialized.h:
 

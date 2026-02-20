@@ -11,6 +11,7 @@
 #define CIRA_INTERNAL_H
 
 #include "cira.h"
+#include "yolo_decoder.h"
 #include <pthread.h>
 #include <time.h>
 
@@ -72,6 +73,7 @@ struct cira_ctx {
     /* Inference settings */
     float confidence_threshold;
     float nms_threshold;
+    yolo_version_t yolo_version;    /* YOLO version (from manifest or auto-detect) */
 
     /* Results */
     cira_detection_t detections[CIRA_MAX_DETECTIONS];

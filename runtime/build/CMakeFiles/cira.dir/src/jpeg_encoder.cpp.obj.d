@@ -12,6 +12,7 @@ CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj: \
  C:/msys64/mingw64/include/stddef.h \
  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
  D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
+ D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h \
  C:/msys64/mingw64/include/pthread.h C:/msys64/mingw64/include/errno.h \
  C:/msys64/mingw64/include/sys/types.h \
  C:/msys64/mingw64/include/_mingw_off_t.h \

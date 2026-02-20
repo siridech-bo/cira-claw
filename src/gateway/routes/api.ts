@@ -316,5 +316,144 @@ export async function registerApiRoutes(
     }
   );
 
+  // Get available models for a node
+  fastify.get<{ Params: NodeParams }>(
+    '/api/nodes/:id/models',
+    async (request: FastifyRequest<{ Params: NodeParams }>, reply: FastifyReply) => {
+      const { id } = request.params;
+      const node = nodeManager.getNode(id);
+
+      if (!node) {
+        return reply.status(404).send({
+          error: 'Node not found',
+          message: `Node with id '${id}' does not exist`,
+        });
+      }
+
+      try {
+        // Proxy models list from the node's runtime
+        const url = `http://${node.host}:${node.runtime.port}/api/models`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          // Return node's configured models as fallback
+          return {
+            nodeId: id,
+            current: nodeManager.getNodeStatus(id)?.inference?.modelName || null,
+            available: node.models || [],
+            source: 'config',
+          };
+        }
+
+        const data = await response.json() as { models?: unknown[]; models_dir?: string };
+        return {
+          nodeId: id,
+          current: nodeManager.getNodeStatus(id)?.inference?.modelName || null,
+          available: data.models || [],
+          modelsDir: data.models_dir || '',
+          source: 'runtime',
+        };
+      } catch (error) {
+        // Return node's configured models as fallback
+        return {
+          nodeId: id,
+          current: nodeManager.getNodeStatus(id)?.inference?.modelName || null,
+          available: node.models || [],
+          source: 'config',
+          error: error instanceof Error ? error.message : 'Connection failed',
+        };
+      }
+    }
+  );
+
+  // Switch model on a node
+  fastify.post<{ Params: NodeParams; Body: { path: string } }>(
+    '/api/nodes/:id/model',
+    async (
+      request: FastifyRequest<{ Params: NodeParams; Body: { path: string } }>,
+      reply: FastifyReply
+    ) => {
+      const { id } = request.params;
+      const { path } = request.body;
+      const node = nodeManager.getNode(id);
+
+      if (!node) {
+        return reply.status(404).send({
+          error: 'Node not found',
+          message: `Node with id '${id}' does not exist`,
+        });
+      }
+
+      if (!path) {
+        return reply.status(400).send({
+          error: 'Missing model path',
+          message: 'Request body must include a "path" field',
+        });
+      }
+
+      try {
+        // Proxy model switch to the node's runtime
+        const url = `http://${node.host}:${node.runtime.port}/api/model`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000); // 30s for model loading
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        const data = await response.json() as {
+          success?: boolean;
+          error?: string;
+          format?: string;
+          model?: string;
+        };
+
+        if (!response.ok || !data.success) {
+          return reply.status(502).send({
+            error: 'Model switch failed',
+            message: data.error || `Node returned HTTP ${response.status}`,
+          });
+        }
+
+        logger.info(`Model switched on node ${id}: ${path}`);
+
+        // Update inference status with new model name
+        const status = nodeManager.getNodeStatus(id);
+        if (status?.inference) {
+          nodeManager.updateStatus(id, {
+            inference: {
+              ...status.inference,
+              modelName: data.format || path.split('/').pop() || 'unknown',
+            },
+          });
+        }
+
+        return {
+          success: true,
+          nodeId: id,
+          model: data.model,
+          format: data.format,
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error(`Failed to switch model on node ${id}: ${errorMessage}`);
+        return reply.status(502).send({
+          error: 'Failed to connect to node',
+          message: errorMessage,
+        });
+      }
+    }
+  );
+
   logger.info('API routes registered');
 }

@@ -17,6 +17,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #ifdef CIRA_STREAMING_ENABLED
 
@@ -59,6 +61,16 @@ typedef struct {
 
 /* Global server state (one per context) */
 static server_state_t* g_server = NULL;
+
+/* Models directory for hot-swapping */
+static char g_models_dir[1024] = "";
+
+/* Set models directory for model listing */
+void server_set_models_dir(const char* dir) {
+    if (dir) {
+        strncpy(g_models_dir, dir, sizeof(g_models_dir) - 1);
+    }
+}
 
 /* MJPEG streaming context */
 typedef struct {
@@ -379,6 +391,13 @@ static int handle_stats(struct MHD_Connection* conn, cira_ctx* ctx) {
     *p++ = '}';
     *p = '\0';
 
+    /* Get model name */
+    const char* model_name = "none";
+    if (ctx->format == CIRA_FORMAT_ONNX) model_name = "ONNX";
+    else if (ctx->format == CIRA_FORMAT_NCNN) model_name = "NCNN";
+    else if (ctx->format == CIRA_FORMAT_DARKNET) model_name = "Darknet";
+    else if (ctx->format == CIRA_FORMAT_TENSORRT) model_name = "TensorRT";
+
     /* Build full response */
     snprintf(response, sizeof(response),
         "{"
@@ -388,7 +407,9 @@ static int handle_stats(struct MHD_Connection* conn, cira_ctx* ctx) {
         "\"fps\":%.1f,"
         "\"uptime_sec\":%ld,"
         "\"timestamp\":\"%s\","
-        "\"model_loaded\":%s"
+        "\"model_loaded\":%s,"
+        "\"model_name\":\"%s\","
+        "\"model_path\":\"%s\""
         "}",
         (unsigned long long)ctx->total_detections,
         (unsigned long long)ctx->total_frames,
@@ -396,7 +417,9 @@ static int handle_stats(struct MHD_Connection* conn, cira_ctx* ctx) {
         cira_get_fps(ctx),
         uptime_sec,
         timestamp,
-        ctx->format != CIRA_FORMAT_UNKNOWN ? "true" : "false"
+        ctx->format != CIRA_FORMAT_UNKNOWN ? "true" : "false",
+        model_name,
+        ctx->model_path
     );
 
     struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
@@ -516,13 +539,18 @@ static int handle_stream(struct MHD_Connection* conn, cira_ctx* ctx, int annotat
     return ret;
 }
 
-/* HTML template for web UI - stored as static buffer */
-static char g_html_template[8192];
+/* HTML template for web UI - built incrementally to avoid overlength string warnings */
+static char g_html_template[16384];
 static int g_html_initialized = 0;
 
 static void init_html_template(void) {
     if (g_html_initialized) return;
-    snprintf(g_html_template, sizeof(g_html_template),
+
+    char* p = g_html_template;
+    char* end = g_html_template + sizeof(g_html_template);
+
+    /* Part 1: Head and styles */
+    p += snprintf(p, end - p,
         "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<title>CiRA Runtime</title><style>"
@@ -531,7 +559,11 @@ static void init_html_template(void) {
         ".hdr{background:#16213e;padding:1rem 2rem;display:flex;justify-content:space-between}"
         ".hdr h1{font-size:1.5rem;color:#0df}.st{display:flex;gap:1rem;align-items:center}"
         ".dot{width:12px;height:12px;border-radius:50%%;background:#4ade80}"
-        ".dot.off{background:#f87171}.cnt{display:flex;gap:1rem;padding:1rem;max-width:1400px;margin:0 auto}"
+        ".dot.off{background:#f87171}"
+        ".cnt{display:flex;gap:1rem;padding:1rem;max-width:1400px;margin:0 auto}");
+
+    /* Part 2: More styles */
+    p += snprintf(p, end - p,
         ".vp{flex:2}.sp{flex:1;display:flex;flex-direction:column;gap:1rem}"
         ".cd{background:#16213e;border-radius:8px;padding:1rem}"
         ".cd h2{font-size:1rem;color:#0df;margin-bottom:.5rem}"
@@ -540,10 +572,30 @@ static void init_html_template(void) {
         ".sg{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}"
         ".s{background:#1a1a2e;padding:.75rem;border-radius:4px;text-align:center}"
         ".sv{font-size:1.5rem;font-weight:bold;color:#0df}.sl{font-size:.75rem;color:#888}"
-        ".dl{max-height:300px;overflow-y:auto}"
+        ".dl{max-height:200px;overflow-y:auto}");
+
+    /* Part 3: Form styles */
+    p += snprintf(p, end - p,
         ".di{display:flex;justify-content:space-between;padding:.5rem;background:#1a1a2e;"
         "margin-bottom:.25rem;border-radius:4px}.lb{color:#4ade80}.cf{color:#fbbf24}"
-        "</style></head><body>"
+        "select{width:100%%;padding:.5rem;background:#1a1a2e;color:#eee;border:1px solid #333;"
+        "border-radius:4px;font-size:.9rem;margin-bottom:.5rem}"
+        "select:focus{outline:none;border-color:#0df}"
+        "button{padding:.5rem 1rem;background:#0df;color:#000;border:none;border-radius:4px;"
+        "cursor:pointer;font-weight:bold;width:100%%}button:hover{background:#0be}"
+        "button:disabled{background:#555;cursor:not-allowed}");
+
+    /* Part 4: Input and message styles */
+    p += snprintf(p, end - p,
+        ".mi{display:flex;gap:.5rem;margin-bottom:.5rem}"
+        ".mi input{flex:1;padding:.5rem;background:#1a1a2e;color:#eee;border:1px solid #333;"
+        "border-radius:4px;font-size:.9rem}.mi input:focus{outline:none;border-color:#0df}"
+        ".msg{padding:.5rem;margin-top:.5rem;border-radius:4px;font-size:.85rem}"
+        ".msg.ok{background:#166534;color:#4ade80}.msg.err{background:#7f1d1d;color:#f87171}"
+        "</style></head><body>");
+
+    /* Part 5: Header and main layout */
+    p += snprintf(p, end - p,
         "<div class=\"hdr\"><h1>CiRA Runtime</h1><div class=\"st\">"
         "<span id=\"fps\">-- FPS</span><div class=\"dot\" id=\"dot\"></div></div></div>"
         "<div class=\"cnt\"><div class=\"vp\"><div class=\"cd\"><h2>Live Stream</h2>"
@@ -553,10 +605,47 @@ static void init_html_template(void) {
         "<div class=\"s\"><div class=\"sv\" id=\"fv\">0</div><div class=\"sl\">FPS</div></div>"
         "<div class=\"s\"><div class=\"sv\" id=\"td\">0</div><div class=\"sl\">Total</div></div>"
         "<div class=\"s\"><div class=\"sv\" id=\"ut\">0s</div><div class=\"sl\">Uptime</div></div>"
-        "</div></div><div class=\"cd\"><h2>Model</h2>"
-        "<p>Status: <span id=\"ms\">-</span></p></div>"
+        "</div></div>");
+
+    /* Part 6: Model selector panel */
+    p += snprintf(p, end - p,
+        "<div class=\"cd\"><h2>Model</h2>"
+        "<p style=\"margin-bottom:.5rem\">Current: <span id=\"mn\">-</span></p>"
+        "<select id=\"msel\"><option value=\"\">Select a model...</option></select>"
+        "<div class=\"mi\"><input type=\"text\" id=\"mpath\" placeholder=\"Or enter model path...\"></div>"
+        "<button id=\"mbtn\" onclick=\"loadModel()\">Load Model</button>"
+        "<div id=\"mmsg\"></div></div>"
         "<div class=\"cd\"><h2>Detections</h2><div class=\"dl\" id=\"det\"></div></div>"
-        "</div></div><script>"
+        "</div></div>");
+
+    /* Part 7: JavaScript - loadModels function */
+    p += snprintf(p, end - p,
+        "<script>let models=[];"
+        "async function loadModels(){"
+        "try{const r=await fetch('/api/models').then(x=>x.json());"
+        "models=r.models||[];const sel=document.getElementById('msel');"
+        "sel.innerHTML='<option value=\"\">Select a model...</option>';"
+        "models.forEach(m=>{"
+        "const opt=document.createElement('option');opt.value=m.path;"
+        "opt.textContent=m.name+(m.loaded?' (current)':'');sel.appendChild(opt);});"
+        "}catch(e){console.error(e);}}");
+
+    /* Part 8: JavaScript - loadModel function */
+    p += snprintf(p, end - p,
+        "async function loadModel(){"
+        "const sel=document.getElementById('msel');const inp=document.getElementById('mpath');"
+        "const path=inp.value.trim()||sel.value;if(!path){alert('Select or enter a model path');return;}"
+        "const btn=document.getElementById('mbtn');const msg=document.getElementById('mmsg');"
+        "btn.disabled=true;btn.textContent='Loading...';"
+        "try{const r=await fetch('/api/model',{method:'POST',headers:{'Content-Type':'application/json'},"
+        "body:JSON.stringify({path:path})}).then(x=>x.json());"
+        "if(r.success){msg.className='msg ok';msg.textContent='Loaded: '+r.format;loadModels();}"
+        "else{msg.className='msg err';msg.textContent=r.error||'Failed';}"
+        "}catch(e){msg.className='msg err';msg.textContent='Error: '+e.message;}"
+        "btn.disabled=false;btn.textContent='Load Model';setTimeout(()=>msg.textContent='',5000);}");
+
+    /* Part 9: JavaScript - update function */
+    p += snprintf(p, end - p,
         "async function u(){try{const[r,s]=await Promise.all(["
         "fetch('/api/results').then(x=>x.json()),"
         "fetch('/api/stats').then(x=>x.json())]);"
@@ -566,16 +655,190 @@ static void init_html_template(void) {
         "document.getElementById('td').textContent=s.total_detections||0;"
         "document.getElementById('ut').textContent=s.uptime_sec+'s';"
         "document.getElementById('dot').className='dot'+(s.model_loaded?'':' off');"
-        "document.getElementById('ms').textContent=s.model_loaded?'Loaded':'Not loaded';"
+        "document.getElementById('mn').textContent=s.model_loaded?(s.model_name||'Loaded'):'Not loaded';");
+
+    /* Part 10: JavaScript - detection list and init */
+    p += snprintf(p, end - p,
         "var l=document.getElementById('det');"
         "if(r.detections&&r.detections.length>0){"
         "l.innerHTML=r.detections.slice(0,10).map(d=>"
         "'<div class=\"di\"><span class=\"lb\">'+d.label+'</span>'+"
         "'<span class=\"cf\">'+(d.confidence*100).toFixed(1)+'%%</span></div>').join('');"
         "}else{l.innerHTML='<p style=\"color:#666;text-align:center\">No detections</p>';}}"
-        "catch(e){}}setInterval(u,500);u();</script></body></html>"
-    );
+        "catch(e){}}"
+        "loadModels();setInterval(u,500);u();</script></body></html>");
+
     g_html_initialized = 1;
+}
+
+/**
+ * Handle GET /api/models - List available models.
+ */
+static int handle_models_list(struct MHD_Connection* conn, cira_ctx* ctx) {
+    (void)ctx;
+    char response[MAX_RESPONSE_SIZE];
+    char* p = response;
+    char* end = response + sizeof(response) - 256;
+
+    p += snprintf(p, end - p, "{\"models\":[");
+
+    int count = 0;
+
+    /* If models directory is set, scan it */
+    if (g_models_dir[0] != '\0') {
+        DIR* d = opendir(g_models_dir);
+        if (d) {
+            struct dirent* entry;
+            while ((entry = readdir(d)) != NULL && p < end) {
+                if (entry->d_name[0] == '.') continue;
+
+                /* Check if it's a directory (potential model folder) */
+                char full_path[2048];
+                snprintf(full_path, sizeof(full_path), "%s/%s", g_models_dir, entry->d_name);
+
+                struct stat st;
+                if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    /* Check for model files inside */
+                    int has_onnx = 0, has_ncnn = 0;
+                    DIR* model_d = opendir(full_path);
+                    if (model_d) {
+                        struct dirent* model_entry;
+                        while ((model_entry = readdir(model_d)) != NULL) {
+                            const char* name = model_entry->d_name;
+                            size_t len = strlen(name);
+                            if (len > 5 && strcmp(name + len - 5, ".onnx") == 0) has_onnx = 1;
+                            if (len > 6 && strcmp(name + len - 6, ".param") == 0) has_ncnn = 1;
+                        }
+                        closedir(model_d);
+                    }
+
+                    if (has_onnx || has_ncnn) {
+                        if (count > 0) p += snprintf(p, end - p, ",");
+                        p += snprintf(p, end - p, "{\"name\":\"%s\",\"path\":\"%s\",\"type\":\"%s\"}",
+                                     entry->d_name, full_path, has_onnx ? "onnx" : "ncnn");
+                        count++;
+                    }
+                }
+            }
+            closedir(d);
+        }
+    }
+
+    /* Also add currently loaded model path if any */
+    if (ctx->model_path[0] != '\0') {
+        /* Check if already in list */
+        int already_listed = (strstr(response, ctx->model_path) != NULL);
+        if (!already_listed && p < end) {
+            if (count > 0) p += snprintf(p, end - p, ",");
+            const char* type = "unknown";
+            if (ctx->format == CIRA_FORMAT_ONNX) type = "onnx";
+            else if (ctx->format == CIRA_FORMAT_NCNN) type = "ncnn";
+            p += snprintf(p, end - p, "{\"name\":\"current\",\"path\":\"%s\",\"type\":\"%s\",\"loaded\":true}",
+                         ctx->model_path, type);
+            count++;
+        }
+    }
+
+    p += snprintf(p, end - p, "],\"count\":%d,\"models_dir\":\"%s\"}", count, g_models_dir);
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
+ * Handle POST /api/model - Load a new model.
+ */
+static int handle_model_load(struct MHD_Connection* conn, cira_ctx* ctx,
+                             const char* upload_data, size_t upload_size) {
+    char response[2048];
+
+    /* Parse model path from POST data (simple JSON: {"path":"..."}) */
+    char model_path[512] = "";
+
+    if (upload_data && upload_size > 0) {
+        /* Find "path" in JSON */
+        const char* path_key = strstr(upload_data, "\"path\"");
+        if (path_key) {
+            path_key = strchr(path_key + 6, '"');
+            if (path_key) {
+                path_key++;
+                const char* path_end = strchr(path_key, '"');
+                if (path_end) {
+                    size_t len = path_end - path_key;
+                    if (len >= sizeof(model_path)) len = sizeof(model_path) - 1;
+                    memcpy(model_path, path_key, len);
+                    model_path[len] = '\0';
+                }
+            }
+        }
+    }
+
+    if (model_path[0] == '\0') {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"Missing model path\"}");
+
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    fprintf(stderr, "Loading model: %s\n", model_path);
+
+    /* Load the new model */
+    int result = cira_load(ctx, model_path);
+
+    if (result == CIRA_OK) {
+        const char* fmt = ctx->format == CIRA_FORMAT_ONNX ? "onnx" :
+                          ctx->format == CIRA_FORMAT_NCNN ? "ncnn" : "unknown";
+        snprintf(response, sizeof(response),
+                "{\"success\":true,\"model\":\"%.500s\",\"format\":\"%s\"}",
+                model_path, fmt);
+    } else {
+        const char* err = cira_error(ctx);
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"%.500s\"}",
+                err ? err : "Failed to load model");
+    }
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, result == CIRA_OK ? MHD_HTTP_OK : MHD_HTTP_BAD_REQUEST, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
+ * Handle OPTIONS for CORS preflight.
+ */
+static int handle_cors_preflight(struct MHD_Connection* conn) {
+    struct MHD_Response* response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+
+    MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+    MHD_add_response_header(response, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
+    MHD_add_response_header(response, "Access-Control-Max-Age", "86400");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
+    MHD_destroy_response(response);
+
+    return ret;
 }
 
 /**
@@ -614,6 +877,13 @@ static int handle_not_found(struct MHD_Connection* conn) {
     return ret;
 }
 
+/* Connection context for POST data accumulation */
+typedef struct {
+    char* data;
+    size_t size;
+    size_t capacity;
+} post_ctx_t;
+
 /**
  * Main request handler callback for MHD.
  */
@@ -628,13 +898,62 @@ static enum MHD_Result request_handler(
     void** con_cls
 ) {
     (void)version;
-    (void)upload_data;
-    (void)upload_data_size;
-    (void)con_cls;
 
     cira_ctx* ctx = (cira_ctx*)cls;
 
-    /* Only handle GET requests */
+    /* Handle CORS preflight */
+    if (strcmp(method, "OPTIONS") == 0) {
+        return handle_cors_preflight(conn);
+    }
+
+    /* Handle POST requests */
+    if (strcmp(method, "POST") == 0) {
+        /* First call - allocate context */
+        if (*con_cls == NULL) {
+            post_ctx_t* pctx = (post_ctx_t*)calloc(1, sizeof(post_ctx_t));
+            if (!pctx) return MHD_NO;
+            pctx->capacity = 4096;
+            pctx->data = (char*)malloc(pctx->capacity);
+            if (!pctx->data) { free(pctx); return MHD_NO; }
+            pctx->size = 0;
+            *con_cls = pctx;
+            return MHD_YES;
+        }
+
+        post_ctx_t* pctx = (post_ctx_t*)*con_cls;
+
+        /* Accumulate upload data */
+        if (*upload_data_size > 0) {
+            if (pctx->size + *upload_data_size >= pctx->capacity) {
+                pctx->capacity = pctx->size + *upload_data_size + 1024;
+                char* new_data = (char*)realloc(pctx->data, pctx->capacity);
+                if (!new_data) return MHD_NO;
+                pctx->data = new_data;
+            }
+            memcpy(pctx->data + pctx->size, upload_data, *upload_data_size);
+            pctx->size += *upload_data_size;
+            pctx->data[pctx->size] = '\0';
+            *upload_data_size = 0;
+            return MHD_YES;
+        }
+
+        /* All data received - process request */
+        int ret = MHD_NO;
+        if (strcmp(url, "/api/model") == 0) {
+            ret = handle_model_load(conn, ctx, pctx->data, pctx->size);
+        } else {
+            ret = handle_not_found(conn);
+        }
+
+        /* Clean up */
+        free(pctx->data);
+        free(pctx);
+        *con_cls = NULL;
+
+        return ret;
+    }
+
+    /* Handle GET requests */
     if (strcmp(method, "GET") != 0) {
         return handle_not_found(conn);
     }
@@ -651,6 +970,9 @@ static enum MHD_Result request_handler(
     }
     if (strcmp(url, "/api/stats") == 0) {
         return handle_stats(conn, ctx);
+    }
+    if (strcmp(url, "/api/models") == 0) {
+        return handle_models_list(conn, ctx);
     }
     if (strcmp(url, "/snapshot") == 0) {
         return handle_snapshot(conn, ctx);

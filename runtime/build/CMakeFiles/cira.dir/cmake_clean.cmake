@@ -13,6 +13,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/cira.dir/src/onnx_loader.c.obj.d"
   "CMakeFiles/cira.dir/src/stream_server.c.obj"
   "CMakeFiles/cira.dir/src/stream_server.c.obj.d"
+  "CMakeFiles/cira.dir/src/yolo_decoder.c.obj"
+  "CMakeFiles/cira.dir/src/yolo_decoder.c.obj.d"
   "libcira.dll"
   "libcira.dll.a"
   "libcira.dll.manifest"

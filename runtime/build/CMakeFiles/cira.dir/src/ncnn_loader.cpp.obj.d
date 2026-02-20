@@ -10,8 +10,10 @@ CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj: \
  C:/msys64/mingw64/include/vadefs.h \
  C:/msys64/mingw64/include/sdks/_mingw_ddk.h \
  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stddef.h \
- C:/msys64/mingw64/include/stddef.h C:/msys64/mingw64/include/pthread.h \
- C:/msys64/mingw64/include/errno.h C:/msys64/mingw64/include/sys/types.h \
+ C:/msys64/mingw64/include/stddef.h \
+ D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h \
+ C:/msys64/mingw64/include/pthread.h C:/msys64/mingw64/include/errno.h \
+ C:/msys64/mingw64/include/sys/types.h \
  C:/msys64/mingw64/include/_mingw_off_t.h \
  C:/msys64/mingw64/include/process.h \
  C:/msys64/mingw64/include/corecrt_startup.h \

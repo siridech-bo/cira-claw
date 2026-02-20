@@ -47,8 +47,23 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const rebooting = ref(false);
 
+// Model management state
+interface ModelInfo {
+  name: string;
+  path: string;
+  type?: string;
+  loaded?: boolean;
+}
+
+const availableModels = ref<ModelInfo[]>([]);
+const selectedModelPath = ref('');
+const modelSwitching = ref(false);
+const modelError = ref<string | null>(null);
+const modelSuccess = ref<string | null>(null);
+
 onMounted(async () => {
   await fetchNode();
+  await fetchModels();
 });
 
 async function fetchNode() {
@@ -89,6 +104,57 @@ async function rebootDevice() {
     alert('Failed to reboot device');
   } finally {
     rebooting.value = false;
+  }
+}
+
+async function fetchModels() {
+  try {
+    const response = await fetch(`/api/nodes/${nodeId.value}/models`);
+    if (response.ok) {
+      const data = await response.json();
+      availableModels.value = data.available || [];
+    }
+  } catch (e) {
+    // Silently fail - models list is optional
+  }
+}
+
+async function switchModel() {
+  if (!selectedModelPath.value) {
+    modelError.value = 'Please select a model';
+    return;
+  }
+
+  try {
+    modelSwitching.value = true;
+    modelError.value = null;
+    modelSuccess.value = null;
+
+    const response = await fetch(`/api/nodes/${nodeId.value}/model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: selectedModelPath.value }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || data.error || 'Failed to switch model');
+    }
+
+    modelSuccess.value = `Model loaded: ${data.format || 'success'}`;
+    selectedModelPath.value = '';
+
+    // Refresh node data to update model name
+    await fetchNode();
+    await fetchModels();
+
+    // Clear success message after 5 seconds
+    setTimeout(() => { modelSuccess.value = null; }, 5000);
+  } catch (e) {
+    modelError.value = e instanceof Error ? e.message : 'Failed to switch model';
+  } finally {
+    modelSwitching.value = false;
   }
 }
 
@@ -208,6 +274,49 @@ const rawStreamUrl = computed(() => {
             <span class="label">Defects/Hour</span>
             <span>{{ node.inference.defectsPerHour }}</span>
           </div>
+        </div>
+
+        <div class="info-card model-card">
+          <h3>Model Management</h3>
+          <div class="info-row">
+            <span class="label">Current Model</span>
+            <span>{{ node.inference?.modelName || 'None loaded' }}</span>
+          </div>
+
+          <div class="model-selector">
+            <select
+              v-model="selectedModelPath"
+              :disabled="modelSwitching || node.status !== 'online'"
+            >
+              <option value="">Select a model...</option>
+              <option
+                v-for="model in availableModels"
+                :key="model.path"
+                :value="model.path"
+              >
+                {{ model.name }}{{ model.loaded ? ' (current)' : '' }}
+              </option>
+            </select>
+
+            <button
+              class="switch-btn"
+              @click="switchModel"
+              :disabled="modelSwitching || !selectedModelPath || node.status !== 'online'"
+            >
+              {{ modelSwitching ? 'Loading...' : 'Switch Model' }}
+            </button>
+          </div>
+
+          <div class="model-message success" v-if="modelSuccess">
+            {{ modelSuccess }}
+          </div>
+          <div class="model-message error" v-if="modelError">
+            {{ modelError }}
+          </div>
+
+          <p class="model-hint" v-if="node.status !== 'online'">
+            Device must be online to switch models
+          </p>
         </div>
 
         <div class="info-card">
@@ -443,6 +552,86 @@ const rawStreamUrl = computed(() => {
 .action-btn:disabled {
   background: #94a3b8;
   cursor: not-allowed;
+}
+
+/* Model Management Styles */
+.model-card {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.model-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.model-selector select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: white;
+  cursor: pointer;
+}
+
+.model-selector select:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.model-selector select:disabled {
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+
+.switch-btn {
+  padding: 10px 20px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.switch-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.switch-btn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+.model-message {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.model-message.success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+.model-message.error {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.model-hint {
+  margin-top: 12px;
+  font-size: 0.75rem;
+  color: #64748b;
+  font-style: italic;
 }
 
 @media (max-width: 768px) {

@@ -200,6 +200,132 @@ static int load_labels(cira_ctx* ctx, const char* path) {
     return ctx->num_labels;
 }
 
+/* Simple JSON value extraction (no external deps) */
+static int json_get_string(const char* json, const char* key, char* out, size_t out_size) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+
+    const char* pos = strstr(json, pattern);
+    if (!pos) return 0;
+
+    pos += strlen(pattern);
+    while (*pos && (*pos == ' ' || *pos == ':' || *pos == '\t')) pos++;
+    if (*pos != '"') return 0;
+    pos++;
+
+    size_t i = 0;
+    while (*pos && *pos != '"' && i < out_size - 1) {
+        out[i++] = *pos++;
+    }
+    out[i] = '\0';
+    return 1;
+}
+
+static int json_get_int(const char* json, const char* key, int* out) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+
+    const char* pos = strstr(json, pattern);
+    if (!pos) return 0;
+
+    pos += strlen(pattern);
+    while (*pos && (*pos == ' ' || *pos == ':' || *pos == '\t')) pos++;
+
+    *out = atoi(pos);
+    return 1;
+}
+
+static int json_get_float(const char* json, const char* key, float* out) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+
+    const char* pos = strstr(json, pattern);
+    if (!pos) return 0;
+
+    pos += strlen(pattern);
+    while (*pos && (*pos == ' ' || *pos == ':' || *pos == '\t')) pos++;
+
+    *out = (float)atof(pos);
+    return 1;
+}
+
+/* Load model manifest (cira_model.json) */
+static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
+    char manifest_path[1024];
+    snprintf(manifest_path, sizeof(manifest_path), "%s/cira_model.json", model_dir);
+
+    FILE* f = fopen(manifest_path, "r");
+    if (!f) {
+        /* No manifest - use auto-detection (not an error) */
+        ctx->yolo_version = YOLO_VERSION_AUTO;
+        return 0;
+    }
+
+    /* Read entire file */
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (size <= 0 || size > 65536) {
+        fclose(f);
+        return 0;
+    }
+
+    char* json = (char*)malloc(size + 1);
+    if (!json) {
+        fclose(f);
+        return 0;
+    }
+
+    size_t read_size = fread(json, 1, size, f);
+    fclose(f);
+    json[read_size] = '\0';
+
+    /* Parse manifest fields */
+    char version_str[32] = {0};
+    if (json_get_string(json, "yolo_version", version_str, sizeof(version_str))) {
+        ctx->yolo_version = yolo_parse_version(version_str);
+        fprintf(stderr, "Manifest: yolo_version=%s (%s)\n",
+                version_str, yolo_version_name(ctx->yolo_version));
+    }
+
+    int input_size = 0;
+    if (json_get_int(json, "input_size", &input_size) && input_size > 0) {
+        ctx->input_w = input_size;
+        ctx->input_h = input_size;
+        fprintf(stderr, "Manifest: input_size=%d\n", input_size);
+    }
+
+    int input_w = 0, input_h = 0;
+    if (json_get_int(json, "input_width", &input_w) && input_w > 0) {
+        ctx->input_w = input_w;
+    }
+    if (json_get_int(json, "input_height", &input_h) && input_h > 0) {
+        ctx->input_h = input_h;
+    }
+
+    float conf = 0;
+    if (json_get_float(json, "confidence_threshold", &conf) && conf > 0) {
+        ctx->confidence_threshold = conf;
+        fprintf(stderr, "Manifest: confidence_threshold=%.2f\n", conf);
+    }
+
+    float nms = 0;
+    if (json_get_float(json, "nms_threshold", &nms) && nms > 0) {
+        ctx->nms_threshold = nms;
+        fprintf(stderr, "Manifest: nms_threshold=%.2f\n", nms);
+    }
+
+    int num_classes = 0;
+    if (json_get_int(json, "num_classes", &num_classes) && num_classes > 0) {
+        fprintf(stderr, "Manifest: num_classes=%d\n", num_classes);
+        /* num_classes is used by loaders, not stored in ctx directly */
+    }
+
+    free(json);
+    return 1;
+}
+
 /* Detect model format from path */
 static cira_format_t detect_format(const char* path) {
     if (is_directory(path)) {
@@ -291,6 +417,7 @@ cira_ctx* cira_create(void) {
     ctx->format = CIRA_FORMAT_UNKNOWN;
     ctx->confidence_threshold = 0.5f;
     ctx->nms_threshold = 0.4f;
+    ctx->yolo_version = YOLO_VERSION_AUTO;
     ctx->input_w = 416;
     ctx->input_h = 416;
 
@@ -404,8 +531,13 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
 
     strncpy(ctx->model_path, config_path, sizeof(ctx->model_path) - 1);
 
-    /* Try to load labels */
+    /* Initialize YOLO version to auto-detect */
+    ctx->yolo_version = YOLO_VERSION_AUTO;
+
+    /* Try to load manifest and labels */
     if (is_directory(config_path)) {
+        /* Load manifest first (sets yolo_version, input size, thresholds) */
+        load_model_manifest(ctx, config_path);
         char label_path[1024];
         snprintf(label_path, sizeof(label_path), "%s/obj.names", config_path);
         if (!file_exists(label_path)) {
