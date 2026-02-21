@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import CameraStream from '../components/CameraStream.vue';
 
 interface NodeMetrics {
   fps: number | null;
@@ -60,6 +61,7 @@ const selectedModelPath = ref('');
 const modelSwitching = ref(false);
 const modelError = ref<string | null>(null);
 const modelSuccess = ref<string | null>(null);
+const streamMode = ref<'auto' | 'mjpeg' | 'polling'>('auto');
 
 onMounted(async () => {
   await fetchNode();
@@ -167,15 +169,6 @@ function formatUptime(seconds: number | null | undefined): string {
   return `${hours} hours, ${minutes} minutes`;
 }
 
-const streamUrl = computed(() => {
-  if (!node.value) return '';
-  return `http://${node.value.host}:${node.value.runtime?.port || 8080}/stream/annotated`;
-});
-
-const rawStreamUrl = computed(() => {
-  if (!node.value) return '';
-  return `http://${node.value.host}:${node.value.runtime?.port || 8080}/stream/raw`;
-});
 </script>
 
 <template>
@@ -195,13 +188,22 @@ const rawStreamUrl = computed(() => {
 
     <div class="detail-content" v-else-if="node">
       <div class="streams-section">
+        <div class="stream-mode-selector">
+          <label>Stream Mode:</label>
+          <select v-model="streamMode">
+            <option value="auto">Auto (MJPEG with fallback)</option>
+            <option value="mjpeg">MJPEG only</option>
+            <option value="polling">Polling (file-based)</option>
+          </select>
+        </div>
         <div class="stream-container">
           <h3>Annotated Feed</h3>
-          <img
+          <CameraStream
             v-if="node.status === 'online'"
-            :src="streamUrl"
-            alt="Annotated camera feed"
-            class="stream-image"
+            :host="node.host"
+            :port="node.runtime?.port || 8080"
+            :annotated="true"
+            :mode="streamMode"
           />
           <div class="stream-offline" v-else>
             <p>Device is {{ node.status }}</p>
@@ -209,11 +211,12 @@ const rawStreamUrl = computed(() => {
         </div>
         <div class="stream-container">
           <h3>Raw Feed</h3>
-          <img
+          <CameraStream
             v-if="node.status === 'online'"
-            :src="rawStreamUrl"
-            alt="Raw camera feed"
-            class="stream-image"
+            :host="node.host"
+            :port="node.runtime?.port || 8080"
+            :annotated="false"
+            :mode="streamMode"
           />
           <div class="stream-offline" v-else>
             <p>Device is {{ node.status }}</p>
@@ -415,6 +418,33 @@ const rawStreamUrl = computed(() => {
   grid-template-columns: repeat(2, 1fr);
   gap: 20px;
   margin-bottom: 24px;
+}
+
+.stream-mode-selector {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: #64748b;
+  padding: 12px 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.stream-mode-selector select {
+  padding: 6px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.stream-mode-selector select:focus {
+  outline: none;
+  border-color: #2563eb;
 }
 
 .stream-container {

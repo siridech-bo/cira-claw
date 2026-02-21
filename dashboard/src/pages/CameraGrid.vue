@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
+import CameraStream from '../components/CameraStream.vue';
 
 interface Node {
   id: string;
@@ -20,9 +21,10 @@ interface Node {
 const nodes = ref<Node[]>([]);
 const loading = ref(true);
 const gridSize = ref<'2x2' | '3x3'>('2x2');
+const streamMode = ref<'auto' | 'mjpeg' | 'polling'>('auto');
 
-// Track stream reload keys to force refresh on error
-const streamKeys = ref<Record<string, number>>({});
+// Track stream component refs for refresh
+const streamRefs = ref<Record<string, InstanceType<typeof CameraStream> | null>>({});
 
 let refreshInterval: number | null = null;
 
@@ -51,13 +53,6 @@ async function fetchNodes() {
     if (!response.ok) throw new Error('Failed to fetch');
     const data = await response.json();
     nodes.value = data.nodes;
-
-    // Initialize stream keys for new nodes
-    for (const node of data.nodes) {
-      if (!(node.id in streamKeys.value)) {
-        streamKeys.value[node.id] = Date.now();
-      }
-    }
   } catch (e) {
     console.error('Failed to load nodes:', e);
   } finally {
@@ -65,22 +60,17 @@ async function fetchNodes() {
   }
 }
 
-function getStreamUrl(node: Node): string {
-  const key = streamKeys.value[node.id] || Date.now();
-  return `http://${node.host}:${node.runtime?.port || 8080}/stream/annotated?_t=${key}`;
-}
-
-// Handle image load error - reload after a delay
-function handleStreamError(nodeId: string) {
-  console.log(`Stream error for ${nodeId}, will retry...`);
-  setTimeout(() => {
-    streamKeys.value[nodeId] = Date.now();
-  }, 2000);
-}
-
 // Force refresh a specific stream
 function refreshStream(nodeId: string) {
-  streamKeys.value[nodeId] = Date.now();
+  const streamRef = streamRefs.value[nodeId];
+  if (streamRef) {
+    streamRef.refresh();
+  }
+}
+
+// Handle stream error
+function handleStreamError(nodeId: string, msg: string) {
+  console.error(`Stream error for ${nodeId}: ${msg}`);
 }
 </script>
 
@@ -88,19 +78,29 @@ function refreshStream(nodeId: string) {
   <div class="camera-grid-page">
     <header class="page-header">
       <h2>All Cameras</h2>
-      <div class="grid-controls">
-        <button
-          :class="{ active: gridSize === '2x2' }"
-          @click="gridSize = '2x2'"
-        >
-          2×2
-        </button>
-        <button
-          :class="{ active: gridSize === '3x3' }"
-          @click="gridSize = '3x3'"
-        >
-          3×3
-        </button>
+      <div class="header-controls">
+        <div class="mode-selector">
+          <label>Mode:</label>
+          <select v-model="streamMode">
+            <option value="auto">Auto</option>
+            <option value="mjpeg">MJPEG</option>
+            <option value="polling">Polling</option>
+          </select>
+        </div>
+        <div class="grid-controls">
+          <button
+            :class="{ active: gridSize === '2x2' }"
+            @click="gridSize = '2x2'"
+          >
+            2×2
+          </button>
+          <button
+            :class="{ active: gridSize === '3x3' }"
+            @click="gridSize = '3x3'"
+          >
+            3×3
+          </button>
+        </div>
       </div>
     </header>
 
@@ -114,13 +114,15 @@ function refreshStream(nodeId: string) {
       <div
         class="camera-cell"
         v-for="node in onlineNodes"
-        :key="node.id + '-' + streamKeys[node.id]"
+        :key="node.id"
       >
-        <img
-          :src="getStreamUrl(node)"
-          :alt="node.name"
-          class="camera-feed"
-          @error="handleStreamError(node.id)"
+        <CameraStream
+          :ref="(el: any) => { streamRefs[node.id] = el }"
+          :host="node.host"
+          :port="node.runtime?.port || 8080"
+          :annotated="true"
+          :mode="streamMode"
+          @error="handleStreamError(node.id, $event)"
         />
         <div class="camera-overlay">
           <div class="camera-name">{{ node.name }}</div>
@@ -158,6 +160,34 @@ function refreshStream(nodeId: string) {
 .page-header h2 {
   font-size: 1.5rem;
   font-weight: 600;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.mode-selector select {
+  padding: 6px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.mode-selector select:focus {
+  outline: none;
+  border-color: #2563eb;
 }
 
 .grid-controls {
@@ -209,12 +239,6 @@ function refreshStream(nodeId: string) {
   border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 16/9;
-}
-
-.camera-feed {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .camera-overlay {

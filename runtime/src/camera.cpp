@@ -55,6 +55,9 @@ extern "C" int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
 extern "C" int trt_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels);
 #endif
 
+/* Forward declaration for frame file writing */
+extern "C" int cira_write_frame_file(cira_ctx* ctx, int annotated);
+
 /* Timing helper */
 static double get_time_ms(void) {
 #ifdef _WIN32
@@ -111,46 +114,62 @@ static void* camera_thread_func_impl(void* arg) {
         /* Store frame for streaming server */
         cira_store_frame(ctx, rgb.data, rgb.cols, rgb.rows);
 
-        /* Run inference if model is loaded */
-        if (ctx->format != CIRA_FORMAT_UNKNOWN && ctx->model_handle != NULL) {
-            /* Call predict with RGB data */
-            int result = CIRA_ERROR;
+        /* Write frame to temp file periodically for file-based transfer */
+        /* Write every 3 frames (~10 FPS at 30 FPS capture) to reduce disk I/O */
+        static int write_counter = 0;
+        if (++write_counter >= 3) {
+            write_counter = 0;
+            cira_write_frame_file(ctx, 1);  /* 1 = annotated */
+        }
 
-            switch (ctx->format) {
+        /* Run inference if model is loaded and not being swapped */
+        if (ctx->format != CIRA_FORMAT_UNKNOWN && ctx->model_handle != NULL && !ctx->model_swapping) {
+            /* Lock model mutex to prevent model unload during inference */
+            if (pthread_mutex_trylock(&ctx->model_mutex) == 0) {
+                /* Double-check after acquiring lock */
+                if (ctx->model_handle != NULL && !ctx->model_swapping) {
+                    /* Call predict with RGB data */
+                    int result = CIRA_ERROR;
+
+                    switch (ctx->format) {
 #ifdef CIRA_DARKNET_ENABLED
-                case CIRA_FORMAT_DARKNET:
-                    result = darknet_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
-                    break;
+                        case CIRA_FORMAT_DARKNET:
+                            result = darknet_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
+                            break;
 #endif
 #ifdef CIRA_NCNN_ENABLED
-                case CIRA_FORMAT_NCNN:
-                    result = ncnn_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
-                    break;
+                        case CIRA_FORMAT_NCNN:
+                            result = ncnn_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
+                            break;
 #endif
 #ifdef CIRA_ONNX_ENABLED
-                case CIRA_FORMAT_ONNX:
-                    result = onnx_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
-                    break;
+                        case CIRA_FORMAT_ONNX:
+                            result = onnx_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
+                            break;
 #endif
 #ifdef CIRA_TRT_ENABLED
-                case CIRA_FORMAT_TENSORRT:
-                    result = trt_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
-                    break;
+                        case CIRA_FORMAT_TENSORRT:
+                            result = trt_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
+                            break;
 #endif
-                default:
-                    break;
-            }
+                        default:
+                            break;
+                    }
 
-            if (result == CIRA_OK) {
-                /* Increment total frames for stats */
-                ctx->total_frames++;
-            } else if (result != CIRA_ERROR) {
-                /* Log inference errors occasionally */
-                static int err_count = 0;
-                if (++err_count % 100 == 1) {
-                    fprintf(stderr, "Inference error: %d\n", result);
+                    if (result == CIRA_OK) {
+                        /* Increment total frames for stats */
+                        ctx->total_frames++;
+                    } else if (result != CIRA_ERROR) {
+                        /* Log inference errors occasionally */
+                        static int err_count = 0;
+                        if (++err_count % 100 == 1) {
+                            fprintf(stderr, "Inference error: %d\n", result);
+                        }
+                    }
                 }
+                pthread_mutex_unlock(&ctx->model_mutex);
             }
+            /* If trylock fails, model is being swapped - skip this frame */
         }
 
         /* Calculate FPS */

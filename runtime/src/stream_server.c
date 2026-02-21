@@ -65,6 +65,108 @@ static server_state_t* g_server = NULL;
 /* Models directory for hot-swapping */
 static char g_models_dir[1024] = "";
 
+/* Temp directory for frame files */
+static char g_temp_dir[512] = "";
+
+/**
+ * Get cross-platform temp directory.
+ */
+static const char* get_temp_dir(void) {
+    if (g_temp_dir[0] != '\0') return g_temp_dir;
+
+#ifdef _WIN32
+    /* Windows: use %TEMP% or %TMP% */
+    const char* temp = getenv("TEMP");
+    if (!temp) temp = getenv("TMP");
+    if (!temp) temp = "C:\\Temp";
+    strncpy(g_temp_dir, temp, sizeof(g_temp_dir) - 1);
+#else
+    /* Linux/macOS: use /tmp */
+    strncpy(g_temp_dir, "/tmp", sizeof(g_temp_dir) - 1);
+#endif
+
+    return g_temp_dir;
+}
+
+/**
+ * Write current frame to temp file atomically.
+ * Uses write-to-temp + rename pattern for atomic updates.
+ *
+ * @param ctx Context with frame data
+ * @param annotated 1 for annotated frame, 0 for raw
+ * @return CIRA_OK on success
+ */
+int cira_write_frame_file(cira_ctx* ctx, int annotated) {
+    if (!ctx) return CIRA_ERROR_INPUT;
+
+    /* Get frame data */
+    int w, h;
+    const uint8_t* frame = cira_get_frame(ctx, &w, &h);
+    if (!frame || w <= 0 || h <= 0) {
+        return CIRA_ERROR;  /* No frame available */
+    }
+
+    /* Encode to JPEG */
+    uint8_t* jpeg;
+    size_t jpeg_size;
+    int ret;
+
+    if (annotated) {
+        ret = jpeg_encode_annotated(ctx, frame, w, h, 85, &jpeg, &jpeg_size);
+    } else {
+        ret = jpeg_encode(frame, w, h, 85, &jpeg, &jpeg_size);
+    }
+
+    if (ret != CIRA_OK || !jpeg || jpeg_size == 0) {
+        return CIRA_ERROR;
+    }
+
+    /* Build temp file path */
+    char temp_path[512];
+    char final_path[512];
+    snprintf(temp_path, sizeof(temp_path), "%s/cira_frame_%p.tmp",
+             get_temp_dir(), (void*)ctx);
+    snprintf(final_path, sizeof(final_path), "%s/cira_frame_%p.jpg",
+             get_temp_dir(), (void*)ctx);
+
+    pthread_mutex_lock(&ctx->frame_file_mutex);
+
+    /* Write to temp file */
+    FILE* f = fopen(temp_path, "wb");
+    if (!f) {
+        pthread_mutex_unlock(&ctx->frame_file_mutex);
+        return CIRA_ERROR_FILE;
+    }
+
+    size_t written = fwrite(jpeg, 1, jpeg_size, f);
+    fclose(f);
+
+    if (written != jpeg_size) {
+        unlink(temp_path);
+        pthread_mutex_unlock(&ctx->frame_file_mutex);
+        return CIRA_ERROR_FILE;
+    }
+
+    /* Atomic rename (overwrites existing file) */
+#ifdef _WIN32
+    /* Windows: remove destination first, then rename */
+    unlink(final_path);
+#endif
+    if (rename(temp_path, final_path) != 0) {
+        unlink(temp_path);
+        pthread_mutex_unlock(&ctx->frame_file_mutex);
+        return CIRA_ERROR_FILE;
+    }
+
+    /* Update context with file path and sequence */
+    strncpy(ctx->frame_file_path, final_path, sizeof(ctx->frame_file_path) - 1);
+    ctx->frame_sequence++;
+
+    pthread_mutex_unlock(&ctx->frame_file_mutex);
+
+    return CIRA_OK;
+}
+
 /* Set models directory for model listing */
 void server_set_models_dir(const char* dir) {
     if (dir) {
@@ -844,6 +946,159 @@ static int handle_model_load(struct MHD_Connection* conn, cira_ctx* ctx,
 }
 
 /**
+ * Handle /frame/latest endpoint - serve latest frame from file.
+ * This is a file-based alternative to MJPEG streaming for better cross-platform stability.
+ */
+static int handle_frame_latest(struct MHD_Connection* conn, cira_ctx* ctx) {
+    pthread_mutex_lock(&ctx->frame_file_mutex);
+
+    /* Check if we have a frame file */
+    if (ctx->frame_file_path[0] == '\0') {
+        pthread_mutex_unlock(&ctx->frame_file_mutex);
+
+        /* No frame file yet - try to generate one */
+        int w, h;
+        const uint8_t* frame = cira_get_frame(ctx, &w, &h);
+        if (!frame || w <= 0 || h <= 0) {
+            const char* error = "{\"error\":\"No frame available\"}";
+            struct MHD_Response* response = MHD_create_response_from_buffer(
+                strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+            MHD_add_response_header(response, "Content-Type", CT_JSON);
+            MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+            int ret = MHD_queue_response(conn, MHD_HTTP_SERVICE_UNAVAILABLE, response);
+            MHD_destroy_response(response);
+            return ret;
+        }
+
+        /* Generate frame file */
+        if (cira_write_frame_file(ctx, 1) != CIRA_OK) {
+            const char* error = "{\"error\":\"Failed to generate frame\"}";
+            struct MHD_Response* response = MHD_create_response_from_buffer(
+                strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+            MHD_add_response_header(response, "Content-Type", CT_JSON);
+            MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+            int ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+            MHD_destroy_response(response);
+            return ret;
+        }
+
+        pthread_mutex_lock(&ctx->frame_file_mutex);
+    }
+
+    /* Read frame file */
+    FILE* f = fopen(ctx->frame_file_path, "rb");
+    if (!f) {
+        pthread_mutex_unlock(&ctx->frame_file_mutex);
+        const char* error = "{\"error\":\"Frame file not found\"}";
+        struct MHD_Response* response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(response, "Content-Type", CT_JSON);
+        MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    /* Get file size */
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (file_size <= 0 || file_size > 10 * 1024 * 1024) {  /* 10MB max */
+        fclose(f);
+        pthread_mutex_unlock(&ctx->frame_file_mutex);
+        const char* error = "{\"error\":\"Invalid frame file\"}";
+        struct MHD_Response* response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(response, "Content-Type", CT_JSON);
+        int ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    /* Read file content */
+    uint8_t* data = (uint8_t*)malloc(file_size);
+    if (!data) {
+        fclose(f);
+        pthread_mutex_unlock(&ctx->frame_file_mutex);
+        const char* error = "{\"error\":\"Memory allocation failed\"}";
+        struct MHD_Response* response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(response, "Content-Type", CT_JSON);
+        int ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    size_t read_size = fread(data, 1, file_size, f);
+    fclose(f);
+
+    uint64_t seq = ctx->frame_sequence;
+    pthread_mutex_unlock(&ctx->frame_file_mutex);
+
+    if (read_size != (size_t)file_size) {
+        free(data);
+        const char* error = "{\"error\":\"Failed to read frame file\"}";
+        struct MHD_Response* response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(response, "Content-Type", CT_JSON);
+        int ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    /* Return JPEG */
+    struct MHD_Response* response = MHD_create_response_from_buffer(
+        read_size, data, MHD_RESPMEM_MUST_FREE);
+
+    MHD_add_response_header(response, "Content-Type", CT_JPEG);
+    MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+    MHD_add_response_header(response, "Access-Control-Expose-Headers", "X-Frame-Sequence");
+    MHD_add_response_header(response, "Cache-Control", "no-cache, no-store");
+
+    /* Add sequence number header for client-side change detection */
+    char seq_str[32];
+    snprintf(seq_str, sizeof(seq_str), "%llu", (unsigned long long)seq);
+    MHD_add_response_header(response, "X-Frame-Sequence", seq_str);
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
+    MHD_destroy_response(response);
+
+    return ret;
+}
+
+/**
+ * Handle /frame/info endpoint - return frame file info without the image data.
+ */
+static int handle_frame_info(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char response[1024];
+
+    pthread_mutex_lock(&ctx->frame_file_mutex);
+    snprintf(response, sizeof(response),
+        "{"
+        "\"sequence\":%llu,"
+        "\"path\":\"%s\","
+        "\"available\":%s"
+        "}",
+        (unsigned long long)ctx->frame_sequence,
+        ctx->frame_file_path,
+        ctx->frame_file_path[0] != '\0' ? "true" : "false"
+    );
+    pthread_mutex_unlock(&ctx->frame_file_mutex);
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
  * Handle OPTIONS for CORS preflight.
  */
 static int handle_cors_preflight(struct MHD_Connection* conn) {
@@ -851,7 +1106,7 @@ static int handle_cors_preflight(struct MHD_Connection* conn) {
 
     MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
     MHD_add_response_header(response, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
+    MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type, Cache-Control");
     MHD_add_response_header(response, "Access-Control-Max-Age", "86400");
 
     int ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
@@ -1002,6 +1257,13 @@ static enum MHD_Result request_handler(
     if (strcmp(url, "/stream/raw") == 0) {
         return handle_stream(conn, ctx, 0);  /* Raw */
     }
+    /* File-based frame transfer endpoints (cross-platform alternative to MJPEG) */
+    if (strcmp(url, "/frame/latest") == 0) {
+        return handle_frame_latest(conn, ctx);
+    }
+    if (strcmp(url, "/frame/info") == 0) {
+        return handle_frame_info(conn, ctx);
+    }
 
     return handle_not_found(conn);
 }
@@ -1047,6 +1309,7 @@ int server_start(cira_ctx* ctx, int port) {
     fprintf(stderr, "  Health:    http://localhost:%d/health\n", port);
     fprintf(stderr, "  Snapshot:  http://localhost:%d/snapshot\n", port);
     fprintf(stderr, "  Stream:    http://localhost:%d/stream/annotated\n", port);
+    fprintf(stderr, "  Frame:     http://localhost:%d/frame/latest (file-based)\n", port);
     fprintf(stderr, "  Results:   http://localhost:%d/api/results\n", port);
     fprintf(stderr, "  Stats:     http://localhost:%d/api/stats\n", port);
 

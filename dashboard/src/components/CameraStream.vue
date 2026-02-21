@@ -1,0 +1,276 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+
+interface Props {
+  host: string;
+  port: number;
+  annotated?: boolean;
+  mode?: 'auto' | 'mjpeg' | 'polling';
+  pollInterval?: number;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  annotated: true,
+  mode: 'auto',
+  pollInterval: 100,
+});
+
+const emit = defineEmits<{
+  (e: 'error', msg: string): void;
+  (e: 'modeChange', mode: 'mjpeg' | 'polling'): void;
+}>();
+
+const activeMode = ref<'mjpeg' | 'polling'>(props.mode === 'polling' ? 'polling' : 'mjpeg');
+const imgSrc = ref('');
+const loading = ref(true);
+const errorCount = ref(0);
+const lastSequence = ref(0);
+
+let pollTimer: number | null = null;
+
+const baseUrl = computed(() => `http://${props.host}:${props.port}`);
+
+const mjpegUrl = computed(() => {
+  const endpoint = props.annotated ? '/stream/annotated' : '/stream/raw';
+  return `${baseUrl.value}${endpoint}`;
+});
+
+const frameUrl = computed(() => {
+  return `${baseUrl.value}/frame/latest`;
+});
+
+// Start with MJPEG, fallback to polling on errors
+function startMjpeg() {
+  activeMode.value = 'mjpeg';
+  loading.value = true;
+  imgSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+  emit('modeChange', 'mjpeg');
+}
+
+// Switch to polling mode
+function startPolling() {
+  activeMode.value = 'polling';
+  loading.value = true;
+  emit('modeChange', 'polling');
+  pollFrame();
+}
+
+// Poll for new frame
+async function pollFrame() {
+  if (activeMode.value !== 'polling') return;
+
+  try {
+    // Fetch frame with cache-busting timestamp
+    // Note: Don't send Cache-Control header as it triggers CORS preflight
+    const response = await fetch(`${frameUrl.value}?_t=${Date.now()}`, {
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    // Check sequence number from header (optional optimization to skip duplicate frames)
+    const seq = parseInt(response.headers.get('X-Frame-Sequence') || '0', 10);
+
+    // Always process the frame if we get valid data
+    // Only skip if sequence is same AND we already have an image displayed
+    const shouldUpdate = seq !== lastSequence.value || !imgSrc.value || imgSrc.value === '';
+
+    if (shouldUpdate || seq > lastSequence.value) {
+      lastSequence.value = seq;
+
+      // Create blob URL from response
+      const blob = await response.blob();
+
+      // Verify we got actual image data
+      if (blob.size > 0) {
+        const oldSrc = imgSrc.value;
+        imgSrc.value = URL.createObjectURL(blob);
+
+        // Revoke old blob URL to prevent memory leak
+        if (oldSrc && oldSrc.startsWith('blob:')) {
+          URL.revokeObjectURL(oldSrc);
+        }
+      }
+    }
+
+    loading.value = false;
+    errorCount.value = 0;
+
+    // Schedule next poll
+    pollTimer = window.setTimeout(pollFrame, props.pollInterval);
+  } catch (e) {
+    errorCount.value++;
+    if (errorCount.value < 10) {
+      // Retry after a longer delay
+      pollTimer = window.setTimeout(pollFrame, 1000);
+    } else {
+      // Max retries reached - stop loading state and emit error
+      loading.value = false;
+      emit('error', 'Failed to fetch frames');
+    }
+  }
+}
+
+// Handle MJPEG load success
+function onMjpegLoad() {
+  loading.value = false;
+  errorCount.value = 0;
+}
+
+// Handle MJPEG error - switch to polling mode
+function onMjpegError() {
+  errorCount.value++;
+
+  if (props.mode === 'auto' && errorCount.value >= 3) {
+    // Switch to polling mode
+    console.log('MJPEG failed, switching to polling mode');
+    startPolling();
+  } else if (props.mode !== 'polling') {
+    // Retry MJPEG after delay
+    setTimeout(() => {
+      imgSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+    }, 2000);
+  }
+}
+
+// Cleanup
+function stopPolling() {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  // Clean up blob URL
+  if (imgSrc.value && imgSrc.value.startsWith('blob:')) {
+    URL.revokeObjectURL(imgSrc.value);
+  }
+}
+
+// Initialize based on mode
+onMounted(() => {
+  if (props.mode === 'polling') {
+    startPolling();
+  } else {
+    startMjpeg();
+  }
+});
+
+// Watch for mode prop changes
+watch(() => props.mode, (newMode) => {
+  stopPolling();
+  if (newMode === 'polling') {
+    startPolling();
+  } else {
+    startMjpeg();
+  }
+});
+
+// Cleanup on unmount
+onUnmounted(() => {
+  stopPolling();
+});
+
+// Expose method to force refresh
+defineExpose({
+  refresh() {
+    errorCount.value = 0;
+    if (activeMode.value === 'polling') {
+      pollFrame();
+    } else {
+      startMjpeg();
+    }
+  },
+  switchMode(mode: 'mjpeg' | 'polling') {
+    stopPolling();
+    if (mode === 'polling') {
+      startPolling();
+    } else {
+      startMjpeg();
+    }
+  },
+});
+</script>
+
+<template>
+  <div class="camera-stream">
+    <div class="loading-overlay" v-if="loading">
+      <span class="spinner"></span>
+      <span>Connecting...</span>
+    </div>
+    <img
+      v-if="imgSrc"
+      :src="imgSrc"
+      alt="Camera feed"
+      class="stream-img"
+      @load="onMjpegLoad"
+      @error="onMjpegError"
+    />
+    <div class="mode-indicator" :class="activeMode">
+      {{ activeMode === 'mjpeg' ? 'MJPEG' : 'Polling' }}
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.camera-stream {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #1e293b;
+  overflow: hidden;
+}
+
+.stream-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 41, 59, 0.9);
+  color: #94a3b8;
+  gap: 12px;
+  z-index: 10;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #334155;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.mode-indicator {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #94a3b8;
+}
+
+.mode-indicator.mjpeg {
+  color: #4ade80;
+}
+
+.mode-indicator.polling {
+  color: #fbbf24;
+}
+</style>

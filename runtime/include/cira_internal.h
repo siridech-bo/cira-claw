@@ -100,6 +100,15 @@ struct cira_ctx {
     uint64_t detections_by_label[CIRA_MAX_LABELS];  /* Detections per label */
     uint64_t total_frames;                          /* Total frames processed */
     time_t start_time;                              /* Startup timestamp */
+
+    /* Model swap synchronization (prevents NCNN pool allocator errors) */
+    volatile int model_swapping;                    /* Flag: model is being swapped */
+    pthread_mutex_t model_mutex;                    /* Mutex for model access */
+
+    /* File-based frame transfer (cross-platform alternative to MJPEG) */
+    char frame_file_path[512];                      /* Path to current frame file */
+    uint64_t frame_sequence;                        /* Frame sequence number */
+    pthread_mutex_t frame_file_mutex;               /* Mutex for file access */
 };
 
 /* Internal helper functions (defined in cira.c) */

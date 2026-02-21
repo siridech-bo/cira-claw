@@ -423,6 +423,11 @@ cira_ctx* cira_create(void) {
 
     pthread_mutex_init(&ctx->result_mutex, NULL);
     pthread_mutex_init(&ctx->frame_mutex, NULL);
+    pthread_mutex_init(&ctx->model_mutex, NULL);
+    pthread_mutex_init(&ctx->frame_file_mutex, NULL);
+    ctx->model_swapping = 0;
+    ctx->frame_sequence = 0;
+    ctx->frame_file_path[0] = '\0';
 
     /* Initialize empty result JSON */
     strcpy(ctx->result_json, "{\"detections\":[],\"count\":0}");
@@ -483,6 +488,13 @@ void cira_destroy(cira_ctx* ctx) {
 
     pthread_mutex_destroy(&ctx->result_mutex);
     pthread_mutex_destroy(&ctx->frame_mutex);
+    pthread_mutex_destroy(&ctx->model_mutex);
+    pthread_mutex_destroy(&ctx->frame_file_mutex);
+
+    /* Clean up temp frame file */
+    if (ctx->frame_file_path[0] != '\0') {
+        unlink(ctx->frame_file_path);
+    }
 
     free(ctx);
 }
@@ -492,8 +504,15 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
 
     ctx->status = CIRA_STATUS_LOADING;
 
+    /* Signal that model swap is in progress (camera thread will pause inference) */
+    ctx->model_swapping = 1;
+
+    /* Lock model mutex to wait for any in-progress inference to complete */
+    pthread_mutex_lock(&ctx->model_mutex);
+
     /* If already loaded, unload first */
     if (ctx->format != CIRA_FORMAT_UNKNOWN) {
+        fprintf(stderr, "Unloading previous model before loading new one...\n");
         switch (ctx->format) {
 #ifdef CIRA_DARKNET_ENABLED
             case CIRA_FORMAT_DARKNET:
@@ -582,6 +601,11 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
         ctx->status = CIRA_STATUS_READY;
     }
 
+    /* Unlock and clear swapping flag (inference can resume) */
+    pthread_mutex_unlock(&ctx->model_mutex);
+    ctx->model_swapping = 0;
+
+    fprintf(stderr, "Model swap complete, inference can resume\n");
     return result;
 }
 
