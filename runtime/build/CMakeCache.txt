@@ -20,6 +20,9 @@ CIRA_BUILD_SHARED:BOOL=ON
 //Build tests
 CIRA_BUILD_TESTS:BOOL=ON
 
+//No help, variable specified on the command line.
+CIRA_DARKNET_ENABLED:UNINITIALIZED=OFF
+
 //Enable Darknet loader
 CIRA_ENABLE_DARKNET:BOOL=OFF
 
@@ -39,7 +42,7 @@ CIRA_ENABLE_STREAMING:BOOL=ON
 CIRA_ENABLE_TENSORRT:BOOL=OFF
 
 //Enable Vulkan for NCNN
-CIRA_ENABLE_VULKAN:BOOL=ON
+CIRA_ENABLE_VULKAN:BOOL=OFF
 
 //Path to a program.
 CMAKE_ADDR2LINE:FILEPATH=C:/msys64/mingw64/bin/addr2line.exe
@@ -49,13 +52,13 @@ CMAKE_AR:FILEPATH=C:/msys64/mingw64/bin/ar.exe
 
 //Choose the type of build, options are: None Debug Release RelWithDebInfo
 // MinSizeRel ...
-CMAKE_BUILD_TYPE:STRING=
+CMAKE_BUILD_TYPE:STRING=Release
 
 //Enable/Disable color output during build.
 CMAKE_COLOR_MAKEFILE:BOOL=ON
 
 //CXX compiler
-CMAKE_CXX_COMPILER:FILEPATH=C:/msys64/mingw64/bin/c++.exe
+CMAKE_CXX_COMPILER:STRING=C:/msys64/mingw64/bin/c++.exe
 
 //A wrapper around 'ar' adding the appropriate '--plugin' option
 // for the GCC compiler
@@ -84,7 +87,7 @@ CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
 CMAKE_CXX_STANDARD_LIBRARIES:STRING=-lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
 
 //C compiler
-CMAKE_C_COMPILER:FILEPATH=C:/msys64/mingw64/bin/cc.exe
+CMAKE_C_COMPILER:STRING=C:/msys64/mingw64/bin/cc.exe
 
 //A wrapper around 'ar' adding the appropriate '--plugin' option
 // for the GCC compiler
@@ -98,16 +101,16 @@ CMAKE_C_COMPILER_RANLIB:FILEPATH=C:/msys64/mingw64/bin/gcc-ranlib.exe
 CMAKE_C_FLAGS:STRING=
 
 //Flags used by the C compiler during DEBUG builds.
-CMAKE_C_FLAGS_DEBUG:STRING=-g
+CMAKE_C_FLAGS_DEBUG:STRING=
 
 //Flags used by the C compiler during MINSIZEREL builds.
-CMAKE_C_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
+CMAKE_C_FLAGS_MINSIZEREL:STRING=
 
 //Flags used by the C compiler during RELEASE builds.
-CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+CMAKE_C_FLAGS_RELEASE:STRING=
 
 //Flags used by the C compiler during RELWITHDEBINFO builds.
-CMAKE_C_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
+CMAKE_C_FLAGS_RELWITHDEBINFO:STRING=
 
 //Libraries linked by default with all C applications.
 CMAKE_C_STANDARD_LIBRARIES:STRING=-lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
@@ -291,13 +294,13 @@ CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 MICROHTTPD_LIB:FILEPATH=C:/msys64/mingw64/lib/libmicrohttpd.dll.a
 
 //Path to a file.
-ONNXRUNTIME_INCLUDE_DIR:PATH=D:/onnxruntime-win-x64-1.17.0/include
+ONNXRUNTIME_INCLUDE_DIR:PATH=D:/CiRA Claw/onnxruntime-win-x64-1.17.0/include
 
 //Path to a library.
-ONNXRUNTIME_LIB:FILEPATH=D:/onnxruntime-win-x64-1.17.0/lib/onnxruntime.lib
+ONNXRUNTIME_LIB:FILEPATH=D:/CiRA Claw/onnxruntime-win-x64-1.17.0/lib/onnxruntime.lib
 
 //Path to ONNX Runtime installation (e.g., C:/onnxruntime-win-x64-1.17.0)
-ONNXRUNTIME_ROOT:PATH=D:/onnxruntime-win-x64-1.17.0
+ONNXRUNTIME_ROOT:PATH=D:/CiRA Claw/onnxruntime-win-x64-1.17.0
 
 //The directory containing a CMake configuration file for OpenCV.
 OpenCV_DIR:PATH=C:/msys64/mingw64/lib/cmake/opencv4
@@ -320,17 +323,11 @@ OpenMP_gomp_LIBRARY:FILEPATH=C:/msys64/mingw64/lib/libgomp.dll.a
 //Path to the mingwthrd library for OpenMP
 OpenMP_mingwthrd_LIBRARY:FILEPATH=C:/msys64/mingw64/lib/libmingwthrd.a
 
-//Path to a program.
-Vulkan_GLSLANG_VALIDATOR_EXECUTABLE:FILEPATH=C:/msys64/mingw64/bin/glslangValidator.exe
+//Arguments to supply to pkg-config
+PKG_CONFIG_ARGN:STRING=
 
-//Path to a program.
-Vulkan_GLSLC_EXECUTABLE:FILEPATH=C:/msys64/mingw64/bin/glslc.exe
-
-//Path to a file.
-Vulkan_INCLUDE_DIR:PATH=Vulkan_INCLUDE_DIR-NOTFOUND
-
-//Path to a library.
-Vulkan_LIBRARY:FILEPATH=C:/msys64/mingw64/lib/libvulkan-1.dll.a
+//pkg-config executable
+PKG_CONFIG_EXECUTABLE:FILEPATH=C:/msys64/mingw64/bin/pkg-config.exe
 
 //Value Computed by CMake
 cira_BINARY_DIR:STATIC=D:/CiRA Claw/cira-edge/runtime/build
@@ -343,6 +340,9 @@ cira_SOURCE_DIR:STATIC=D:/CiRA Claw/cira-edge/runtime
 
 //The directory containing a CMake configuration file for ncnn.
 ncnn_DIR:PATH=C:/msys64/mingw64/lib/cmake/ncnn
+
+//The directory containing a CMake configuration file for onnxruntime.
+onnxruntime_DIR:PATH=onnxruntime_DIR-NOTFOUND
 
 
 ########################
@@ -407,6 +407,8 @@ CMAKE_C_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 CMAKE_C_STANDARD_LIBRARIES-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_DLLTOOL
 CMAKE_DLLTOOL-ADVANCED:INTERNAL=1
+//Path to cache edit program executable.
+CMAKE_EDIT_COMMAND:INTERNAL=C:/Program Files/CMake/bin/cmake-gui.exe
 //Executable file format
 CMAKE_EXECUTABLE_FORMAT:INTERNAL=Unknown
 //ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS
@@ -517,6 +519,31 @@ FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_C:INTERNAL=[-fopenmp][C:/msys64/mingw64/lib/
 FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_CXX:INTERNAL=[-fopenmp][C:/msys64/mingw64/lib/libgomp.dll.a][C:/msys64/mingw64/lib/libmingwthrd.a][v4.5()]
 //Details about finding Threads
 FIND_PACKAGE_MESSAGE_DETAILS_Threads:INTERNAL=[TRUE][v()]
+ONNXRUNTIME_CFLAGS:INTERNAL=
+ONNXRUNTIME_CFLAGS_I:INTERNAL=
+ONNXRUNTIME_CFLAGS_OTHER:INTERNAL=
+ONNXRUNTIME_FOUND:INTERNAL=
+ONNXRUNTIME_INCLUDEDIR:INTERNAL=
+ONNXRUNTIME_LIBDIR:INTERNAL=
+ONNXRUNTIME_LIBS:INTERNAL=
+ONNXRUNTIME_LIBS_L:INTERNAL=
+ONNXRUNTIME_LIBS_OTHER:INTERNAL=
+ONNXRUNTIME_LIBS_PATHS:INTERNAL=
+ONNXRUNTIME_MODULE_NAME:INTERNAL=
+ONNXRUNTIME_PREFIX:INTERNAL=
+ONNXRUNTIME_STATIC_CFLAGS:INTERNAL=
+ONNXRUNTIME_STATIC_CFLAGS_I:INTERNAL=
+ONNXRUNTIME_STATIC_CFLAGS_OTHER:INTERNAL=
+ONNXRUNTIME_STATIC_LIBDIR:INTERNAL=
+ONNXRUNTIME_STATIC_LIBS:INTERNAL=
+ONNXRUNTIME_STATIC_LIBS_L:INTERNAL=
+ONNXRUNTIME_STATIC_LIBS_OTHER:INTERNAL=
+ONNXRUNTIME_STATIC_LIBS_PATHS:INTERNAL=
+ONNXRUNTIME_VERSION:INTERNAL=
+ONNXRUNTIME_onnxruntime_INCLUDEDIR:INTERNAL=
+ONNXRUNTIME_onnxruntime_LIBDIR:INTERNAL=
+ONNXRUNTIME_onnxruntime_PREFIX:INTERNAL=
+ONNXRUNTIME_onnxruntime_VERSION:INTERNAL=
 //Result of TRY_COMPILE
 OpenMP_COMPILE_RESULT_CXX_fopenmp:INTERNAL=TRUE
 //Result of TRY_COMPILE
@@ -541,12 +568,9 @@ OpenMP_SPECTEST_C_:INTERNAL=TRUE
 OpenMP_gomp_LIBRARY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: OpenMP_mingwthrd_LIBRARY
 OpenMP_mingwthrd_LIBRARY-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: Vulkan_GLSLANG_VALIDATOR_EXECUTABLE
-Vulkan_GLSLANG_VALIDATOR_EXECUTABLE-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: Vulkan_GLSLC_EXECUTABLE
-Vulkan_GLSLC_EXECUTABLE-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: Vulkan_INCLUDE_DIR
-Vulkan_INCLUDE_DIR-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: Vulkan_LIBRARY
-Vulkan_LIBRARY-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: PKG_CONFIG_ARGN
+PKG_CONFIG_ARGN-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: PKG_CONFIG_EXECUTABLE
+PKG_CONFIG_EXECUTABLE-ADVANCED:INTERNAL=1
+__pkg_config_checked_ONNXRUNTIME:INTERNAL=1
 

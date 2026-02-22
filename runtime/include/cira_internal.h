@@ -60,6 +60,7 @@ struct cira_ctx {
     /* Model info */
     cira_format_t format;
     char model_path[1024];
+    char model_name[256];           /* Human-readable model name from manifest */
     void* model_handle;             /* Format-specific model data */
 
     /* Labels */

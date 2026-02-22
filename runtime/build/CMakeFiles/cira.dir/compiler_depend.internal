@@ -1246,7 +1246,7 @@ CMakeFiles/cira.dir/src/onnx_loader.c.obj
  D:/CiRA Claw/cira-edge/runtime/include/cira.h
  D:/CiRA Claw/cira-edge/runtime/include/cira_internal.h
  D:/CiRA Claw/cira-edge/runtime/include/yolo_decoder.h
- D:/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h
+ D:/CiRA Claw/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h
 
 CMakeFiles/cira.dir/src/stream_server.c.obj
  D:/CiRA Claw/cira-edge/runtime/src/stream_server.c

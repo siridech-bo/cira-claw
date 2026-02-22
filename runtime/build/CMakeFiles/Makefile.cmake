@@ -36,7 +36,6 @@ set(CMAKE_MAKEFILE_DEPENDS
   "C:/msys64/mingw64/share/cmake/Modules/FindPackageHandleStandardArgs.cmake"
   "C:/msys64/mingw64/share/cmake/Modules/FindPackageMessage.cmake"
   "C:/msys64/mingw64/share/cmake/Modules/FindThreads.cmake"
-  "C:/msys64/mingw64/share/cmake/Modules/FindVulkan.cmake"
   "C:/msys64/mingw64/share/cmake/Modules/Internal/CMakeCLinkerInformation.cmake"
   "C:/msys64/mingw64/share/cmake/Modules/Internal/CMakeCXXLinkerInformation.cmake"
   "C:/msys64/mingw64/share/cmake/Modules/Internal/CMakeCommonLinkerInformation.cmake"

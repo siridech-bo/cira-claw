@@ -1,1 +1,1 @@
--I"D:/CiRA Claw/cira-edge/runtime/include" -isystem "D:/onnxruntime-win-x64-1.17.0/include" -isystem C:/msys64/mingw64/include/opencv4 -isystem C:/msys64/mingw64/include/ncnn
+-I"D:/CiRA Claw/cira-edge/runtime/include" -isystem "D:/CiRA Claw/onnxruntime-win-x64-1.17.0/include" -isystem C:/msys64/mingw64/include/opencv4 -isystem C:/msys64/mingw64/include/ncnn

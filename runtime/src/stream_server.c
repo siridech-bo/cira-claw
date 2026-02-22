@@ -411,9 +411,11 @@ static int handle_health(struct MHD_Connection* conn, cira_ctx* ctx) {
         defects_per_hour = (float)ctx->total_detections * 3600.0f / uptime;
     }
 
-    /* Get model name - use format name or "unknown" */
+    /* Get model name - prefer manifest name, fall back to format */
     const char* model_name = "unknown";
-    if (ctx->format == CIRA_FORMAT_ONNX) {
+    if (ctx->model_name[0] != '\0') {
+        model_name = ctx->model_name;
+    } else if (ctx->format == CIRA_FORMAT_ONNX) {
         model_name = "ONNX";
     } else if (ctx->format == CIRA_FORMAT_DARKNET) {
         model_name = "Darknet";
@@ -518,12 +520,19 @@ static int handle_stats(struct MHD_Connection* conn, cira_ctx* ctx) {
     *p++ = '}';
     *p = '\0';
 
-    /* Get model name */
+    /* Get model name - prefer manifest name, fall back to format */
     const char* model_name = "none";
-    if (ctx->format == CIRA_FORMAT_ONNX) model_name = "ONNX";
-    else if (ctx->format == CIRA_FORMAT_NCNN) model_name = "NCNN";
-    else if (ctx->format == CIRA_FORMAT_DARKNET) model_name = "Darknet";
-    else if (ctx->format == CIRA_FORMAT_TENSORRT) model_name = "TensorRT";
+    if (ctx->model_name[0] != '\0') {
+        model_name = ctx->model_name;
+    } else if (ctx->format == CIRA_FORMAT_ONNX) {
+        model_name = "ONNX";
+    } else if (ctx->format == CIRA_FORMAT_NCNN) {
+        model_name = "NCNN";
+    } else if (ctx->format == CIRA_FORMAT_DARKNET) {
+        model_name = "Darknet";
+    } else if (ctx->format == CIRA_FORMAT_TENSORRT) {
+        model_name = "TensorRT";
+    }
 
     /* Build full response */
     snprintf(response, sizeof(response),
@@ -1178,12 +1187,19 @@ static int handle_node_detail(struct MHD_Connection* conn, cira_ctx* ctx, const 
     time_t now = time(NULL);
     long uptime_sec = ctx ? (long)(now - ctx->start_time) : 0;
 
-    /* Get model name */
+    /* Get model name - prefer manifest name, fall back to format */
     const char* model_name = "none";
-    if (ctx && ctx->format == CIRA_FORMAT_ONNX) model_name = "ONNX Model";
-    else if (ctx && ctx->format == CIRA_FORMAT_NCNN) model_name = "NCNN Model";
-    else if (ctx && ctx->format == CIRA_FORMAT_DARKNET) model_name = "Darknet Model";
-    else if (ctx && ctx->format == CIRA_FORMAT_TENSORRT) model_name = "TensorRT Model";
+    if (ctx && ctx->model_name[0] != '\0') {
+        model_name = ctx->model_name;
+    } else if (ctx && ctx->format == CIRA_FORMAT_ONNX) {
+        model_name = "ONNX Model";
+    } else if (ctx && ctx->format == CIRA_FORMAT_NCNN) {
+        model_name = "NCNN Model";
+    } else if (ctx && ctx->format == CIRA_FORMAT_DARKNET) {
+        model_name = "Darknet Model";
+    } else if (ctx && ctx->format == CIRA_FORMAT_TENSORRT) {
+        model_name = "TensorRT Model";
+    }
 
     /* Build detailed node info */
     snprintf(response, sizeof(response),

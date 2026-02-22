@@ -619,34 +619,132 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
     for (size_t out_idx = 0; out_idx < model->num_outputs; out_idx++) {
         if (!output_tensors[out_idx]) continue;
 
-        float* output_data;
-        status = g_ort->GetTensorMutableData(output_tensors[out_idx], (void**)&output_data);
+        void* raw_output_data;
+        status = g_ort->GetTensorMutableData(output_tensors[out_idx], &raw_output_data);
         if (status != NULL) {
             g_ort->ReleaseStatus(status);
             continue;
         }
 
-        /* Get output shape */
+        /* Get output shape and type */
         OrtTensorTypeAndShapeInfo* output_info = NULL;
         ORT_IGNORE(g_ort->GetTensorTypeAndShape(output_tensors[out_idx], &output_info));
 
         size_t num_dims = 0;
         int64_t output_shape[6] = {0};
+        ONNXTensorElementDataType output_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+        size_t total_elements = 0;
 
         if (output_info) {
             ORT_IGNORE(g_ort->GetDimensionsCount(output_info, &num_dims));
             if (num_dims <= 6) {
                 ORT_IGNORE(g_ort->GetDimensions(output_info, output_shape, num_dims));
             }
+            ORT_IGNORE(g_ort->GetTensorElementType(output_info, &output_type));
+            ORT_IGNORE(g_ort->GetTensorShapeElementCount(output_info, &total_elements));
             g_ort->ReleaseTensorTypeAndShapeInfo(output_info);
         }
 
+        /* Convert float16 to float32 if needed */
+        float* output_data = NULL;
+        float* converted_buffer = NULL;
+
+        if (output_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+            fprintf(stderr, "ONNX output is float16, converting to float32...\n");
+            converted_buffer = (float*)malloc(total_elements * sizeof(float));
+            if (converted_buffer) {
+                uint16_t* fp16_data = (uint16_t*)raw_output_data;
+                for (size_t i = 0; i < total_elements; i++) {
+                    /* Convert float16 to float32 */
+                    uint16_t h = fp16_data[i];
+                    uint32_t sign = (h & 0x8000) << 16;
+                    uint32_t exponent = (h >> 10) & 0x1F;
+                    uint32_t mantissa = h & 0x3FF;
+
+                    if (exponent == 0) {
+                        /* Denormalized or zero */
+                        if (mantissa == 0) {
+                            converted_buffer[i] = sign ? -0.0f : 0.0f;
+                        } else {
+                            /* Denormalized - convert to normalized float32 */
+                            exponent = 1;
+                            while ((mantissa & 0x400) == 0) {
+                                mantissa <<= 1;
+                                exponent--;
+                            }
+                            mantissa &= 0x3FF;
+                            uint32_t f = sign | ((exponent + 127 - 15) << 23) | (mantissa << 13);
+                            converted_buffer[i] = *(float*)&f;
+                        }
+                    } else if (exponent == 31) {
+                        /* Inf or NaN */
+                        uint32_t f = sign | 0x7F800000 | (mantissa << 13);
+                        converted_buffer[i] = *(float*)&f;
+                    } else {
+                        /* Normalized */
+                        uint32_t f = sign | ((exponent + 127 - 15) << 23) | (mantissa << 13);
+                        converted_buffer[i] = *(float*)&f;
+                    }
+                }
+                output_data = converted_buffer;
+            }
+        } else {
+            output_data = (float*)raw_output_data;
+        }
+
+        if (!output_data) {
+            if (converted_buffer) free(converted_buffer);
+            continue;
+        }
+
         /* Debug output */
-        fprintf(stderr, "ONNX output[%zu]: dims=%zu, shape=[", out_idx, num_dims);
+        const char* type_name = "float32";
+        if (output_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) type_name = "float16";
+        else if (output_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE) type_name = "float64";
+
+        fprintf(stderr, "ONNX output[%zu]: dims=%zu, type=%s, shape=[", out_idx, num_dims, type_name);
         for (size_t i = 0; i < num_dims && i < 6; i++) {
             fprintf(stderr, "%lld%s", (long long)output_shape[i], i < num_dims - 1 ? ", " : "");
         }
         fprintf(stderr, "]\n");
+
+        /* Debug: print first few raw values to verify data access */
+        if (num_dims == 3 && output_shape[1] > 0 && output_shape[2] > 0) {
+            int dim1 = (int)output_shape[1];
+            int dim2 = (int)output_shape[2];
+
+            /* Check if data looks transposed by reading both ways */
+            fprintf(stderr, "  If [1,%d,%d] (row-major, box=row): ", dim1, dim2);
+            fprintf(stderr, "box[0] = [%.2f, %.2f, %.2f, %.2f, obj=%.4f]\n",
+                    output_data[0], output_data[1], output_data[2], output_data[3], output_data[4]);
+
+            fprintf(stderr, "  If [1,%d,%d] (transposed, box=col): ", dim1, dim2);
+            fprintf(stderr, "box[0] = [%.2f, %.2f, %.2f, %.2f, obj=%.4f]\n",
+                    output_data[0 * dim1 + 0], output_data[1 * dim1 + 0],
+                    output_data[2 * dim1 + 0], output_data[3 * dim1 + 0],
+                    output_data[4 * dim1 + 0]);
+
+            /* Sample more boxes to find non-zero objectness */
+            fprintf(stderr, "  Searching for non-zero obj values...\n");
+            int found_count = 0;
+            for (int i = 0; i < dim1 && found_count < 5; i++) {
+                float obj_rowmajor = output_data[i * dim2 + 4];
+                if (obj_rowmajor != 0.0f) {
+                    fprintf(stderr, "    box[%d] row-major obj=%.4f\n", i, obj_rowmajor);
+                    found_count++;
+                }
+            }
+            if (found_count == 0) {
+                fprintf(stderr, "    No non-zero obj in row-major format, trying transposed...\n");
+                for (int i = 0; i < dim2 && found_count < 5; i++) {
+                    float obj_transposed = output_data[4 * dim2 + i];
+                    if (obj_transposed != 0.0f) {
+                        fprintf(stderr, "    box[%d] transposed obj=%.4f\n", i, obj_transposed);
+                        found_count++;
+                    }
+                }
+            }
+        }
 
         /* Decode this output scale */
         int space_left = max_dets_buffer - total_detections;
@@ -659,6 +757,12 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
         if (count > 0) {
             fprintf(stderr, "  Scale %zu: %d detections\n", out_idx, count);
             total_detections += count;
+        }
+
+        /* Free converted buffer if we allocated one */
+        if (converted_buffer) {
+            free(converted_buffer);
+            converted_buffer = NULL;
         }
     }
 
@@ -673,7 +777,18 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
     }
 
     /* Step 7: Add detections to context (convert to normalized x,y,w,h format) */
+    fprintf(stderr, "ONNX: Converting %d detections (input_w=%d, input_h=%d)\n",
+            total_detections, model->input_w, model->input_h);
+
     for (int i = 0; i < total_detections; i++) {
+        /* Debug: show raw pixel coords */
+        if (i < 3) {
+            fprintf(stderr, "  Det[%d] raw: x1=%.1f y1=%.1f x2=%.1f y2=%.1f score=%.2f class=%d\n",
+                    i, detections[i].x1, detections[i].y1,
+                    detections[i].x2, detections[i].y2,
+                    detections[i].score, detections[i].class_id);
+        }
+
         /* Normalize pixel coords to 0-1 */
         float x1 = detections[i].x1 / model->input_w;
         float y1 = detections[i].y1 / model->input_h;
@@ -689,6 +804,12 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
         /* Convert corners to top-left + size */
         float bw = x2 - x1;
         float bh = y2 - y1;
+
+        /* Debug: show normalized coords */
+        if (i < 3) {
+            fprintf(stderr, "  Det[%d] norm: x=%.3f y=%.3f w=%.3f h=%.3f\n",
+                    i, x1, y1, bw, bh);
+        }
 
         if (!cira_add_detection(ctx, x1, y1, bw, bh,
                                 detections[i].score, detections[i].class_id)) {

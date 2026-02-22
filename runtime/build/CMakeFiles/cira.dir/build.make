@@ -214,7 +214,7 @@ libcira.dll: CMakeFiles/cira.dir/src/camera.cpp.obj
 libcira.dll: CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj
 libcira.dll: CMakeFiles/cira.dir/src/annotator.c.obj
 libcira.dll: CMakeFiles/cira.dir/build.make
-libcira.dll: D:/onnxruntime-win-x64-1.17.0/lib/onnxruntime.lib
+libcira.dll: D:/CiRA\ Claw/onnxruntime-win-x64-1.17.0/lib/onnxruntime.lib
 libcira.dll: C:/msys64/mingw64/lib/libncnn.a
 libcira.dll: C:/msys64/mingw64/lib/libmicrohttpd.dll.a
 libcira.dll: C:/msys64/mingw64/lib/libopencv_videoio.dll.a

@@ -43,7 +43,7 @@ CMakeFiles/cira.dir/src/onnx_loader.c.obj: \
  C:/msys64/mingw64/include/math.h C:/msys64/mingw64/include/dirent.h \
  C:/msys64/mingw64/include/io.h C:/msys64/mingw64/include/sys/stat.h \
  C:/msys64/mingw64/include/_mingw_stat64.h \
- D:/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h \
+ D:/CiRA\ Claw/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h \
  C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdbool.h \
  C:/msys64/mingw64/include/specstrings.h C:/msys64/mingw64/include/sal.h \
  C:/msys64/mingw64/include/concurrencysal.h \

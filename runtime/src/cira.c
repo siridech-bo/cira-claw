@@ -282,6 +282,12 @@ static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
     json[read_size] = '\0';
 
     /* Parse manifest fields */
+
+    /* Model name */
+    if (json_get_string(json, "name", ctx->model_name, sizeof(ctx->model_name))) {
+        fprintf(stderr, "Manifest: name=%s\n", ctx->model_name);
+    }
+
     char version_str[32] = {0};
     if (json_get_string(json, "yolo_version", version_str, sizeof(version_str))) {
         ctx->yolo_version = yolo_parse_version(version_str);
@@ -550,6 +556,7 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
     }
 
     strncpy(ctx->model_path, config_path, sizeof(ctx->model_path) - 1);
+    ctx->model_name[0] = '\0';  /* Reset model name before loading manifest */
 
     /* Initialize YOLO version to auto-detect */
     ctx->yolo_version = YOLO_VERSION_AUTO;

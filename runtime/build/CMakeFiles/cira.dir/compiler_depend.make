@@ -1240,7 +1240,7 @@ CMakeFiles/cira.dir/src/onnx_loader.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/o
   D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
   D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h \
-  D:/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h
+  D:/CiRA\ Claw/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h
 
 CMakeFiles/cira.dir/src/stream_server.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/stream_server.c \
   C:/msys64/mingw64/include/_bsd_types.h \
@@ -1600,8 +1600,6 @@ CMakeFiles/cira.dir/src/yolo_decoder.c.obj: D:/CiRA\ Claw/cira-edge/runtime/src/
 
 C:/msys64/mingw64/include/ws2ipdef.h:
 
-D:/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h:
-
 C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/stdbool.h:
 
 D:/CiRA\ Claw/cira-edge/runtime/src/onnx_loader.c:
@@ -1885,6 +1883,8 @@ C:/msys64/mingw64/include/rpc.h:
 C:/msys64/mingw64/include/realtimeapiset.h:
 
 C:/msys64/mingw64/include/pshpack8.h:
+
+D:/CiRA\ Claw/onnxruntime-win-x64-1.17.0/include/onnxruntime_c_api.h:
 
 C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/cmpccxaddintrin.h:
 

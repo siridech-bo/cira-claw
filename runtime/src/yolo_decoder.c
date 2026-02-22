@@ -69,6 +69,9 @@ static int decode_yolov4(const float* output, const int64_t* shape, int num_dims
     }
 
     int count = 0;
+    int checked = 0;
+    float max_obj_seen = 0.0f;
+
     for (int i = 0; i < num_boxes && count < max_dets; i++) {
         const float* box = output + i * box_size;
 
@@ -77,6 +80,10 @@ static int decode_yolov4(const float* output, const int64_t* shape, int num_dims
         if (obj < 0.0f || obj > 1.0f) {
             obj = sigmoid(obj);  /* Raw logits - apply sigmoid */
         }
+
+        if (obj > max_obj_seen) max_obj_seen = obj;
+        checked++;
+
         if (obj < config->conf_threshold) continue;
 
         /* Find best class */
@@ -119,6 +126,9 @@ static int decode_yolov4(const float* output, const int64_t* shape, int num_dims
         dets[count].class_id = best_class;
         count++;
     }
+
+    fprintf(stderr, "decode_yolov4: checked %d boxes, max_obj=%.4f, found %d detections\n",
+            checked, max_obj_seen, count);
 
     return count;
 }
@@ -244,6 +254,13 @@ int yolo_decode(const float* output, const int64_t* output_shape, int num_dims,
         version = yolo_detect_version(output_shape, num_dims, config->num_classes);
     }
 
+    fprintf(stderr, "yolo_decode: detected version=%s, shape=[%lld,%lld,%lld], conf_thresh=%.2f\n",
+            yolo_version_name(version),
+            (long long)(num_dims > 0 ? output_shape[0] : 0),
+            (long long)(num_dims > 1 ? output_shape[1] : 0),
+            (long long)(num_dims > 2 ? output_shape[2] : 0),
+            config->conf_threshold);
+
     int count = 0;
     switch (version) {
         case YOLO_VERSION_V4:
@@ -353,8 +370,8 @@ yolo_version_t yolo_parse_version(const char* version_str) {
 const char* yolo_version_name(yolo_version_t version) {
     switch (version) {
         case YOLO_VERSION_V4:  return "YOLOv4";
-        case YOLO_VERSION_V5:  return "YOLOv5";
-        case YOLO_VERSION_V8:  return "YOLOv8";
+        case YOLO_VERSION_V5:  return "YOLOv5/v7";
+        case YOLO_VERSION_V8:  return "YOLOv8/v9/v11";
         case YOLO_VERSION_V10: return "YOLOv10";
         default:               return "auto";
     }

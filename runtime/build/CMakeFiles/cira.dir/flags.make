@@ -13,5 +13,5 @@ CXX_DEFINES = -DCIRA_NCNN_ENABLED -DCIRA_ONNX_ENABLED -DCIRA_OPENCV_ENABLED -DCI
 
 CXX_INCLUDES = @CMakeFiles/cira.dir/includes_CXX.rsp
 
-CXX_FLAGS = -std=gnu++14 -Wall -Wextra -Werror -pedantic -fopenmp
+CXX_FLAGS = -O3 -DNDEBUG -std=gnu++14 -Wall -Wextra -Werror -pedantic -fopenmp
 
