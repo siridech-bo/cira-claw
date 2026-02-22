@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { getConfigLoader, ConfigLoader } from './config.js';
 import { createGatewayServer, GatewayServer } from './gateway/server.js';
 import { registerApiRoutes } from './gateway/routes/api.js';
@@ -11,6 +12,7 @@ import { createLineChannel, LineChannel } from './channels/line.js';
 import { createMqttChannel, MqttChannel } from './channels/mqtt.js';
 import { createStatsCollector, StatsCollector } from './services/stats-collector.js';
 import { createModbusServer, ModbusServer } from './services/modbus-server.js';
+import { createRuleEngine, RuleEngine } from './services/rule-engine.js';
 import { createLogger, logger as rootLogger } from './utils/logger.js';
 import { CiraConfig } from './utils/config-schema.js';
 
@@ -26,6 +28,7 @@ let lineChannel: LineChannel | null = null;
 let mqttChannel: MqttChannel | null = null;
 let statsCollector: StatsCollector | null = null;
 let modbusServer: ModbusServer | null = null;
+let ruleEngine: RuleEngine | null = null;
 let config: CiraConfig;
 let configPath: string | undefined;
 let isShuttingDown = false;
@@ -275,6 +278,20 @@ async function main(): Promise<void> {
     );
     statsCollector.start(10000); // Poll every 10 seconds
     logger.info('Stats collector started');
+
+    // Initialize rule engine
+    const configDir = path.join(os.homedir(), '.cira');
+    const rulesDir = path.join(configDir, 'rules');
+    ruleEngine = createRuleEngine(rulesDir);
+    logger.info(`Rule engine initialized: ${rulesDir}`);
+
+    // TEMPORARY — Spec D replaces this
+    // Inject rule engine into StatsCollector for poll-cycle evaluation.
+    // When Spec D (Heartbeat Scheduler) is implemented, remove this line
+    // and wire ruleEngine into the HeartbeatScheduler instead.
+    if (statsCollector) {
+      statsCollector.setRuleEngine(ruleEngine);
+    }
 
     // Register WebChat routes for agent chat (after statsCollector for real data)
     await registerChatRoutes(gateway.fastify, {

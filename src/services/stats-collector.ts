@@ -3,6 +3,7 @@ import { NodeConfig, AlertsConfig } from '../utils/config-schema.js';
 import { NodeManager } from '../nodes/manager.js';
 import { MqttChannel } from '../channels/mqtt.js';
 import { createLogger } from '../utils/logger.js';
+import { RuleEngine, RulePayload, RuleAction } from './rule-engine.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -43,6 +44,9 @@ export class StatsCollector extends EventEmitter {
 
   // Track detections for alerts
   private recentDetections: Map<string, { count: number; since: Date }> = new Map();
+
+  // Rule engine for automated rule evaluation
+  private ruleEngine: RuleEngine | null = null;
 
   constructor(
     nodeManager: NodeManager,
@@ -177,6 +181,18 @@ export class StatsCollector extends EventEmitter {
 
       // Emit event for local listeners
       this.emit('stats', stats);
+
+      // TEMPORARY — Spec D (Heartbeat Scheduler) replaces this
+      // with configurable scheduling. Remove this block when Spec D is implemented.
+      if (this.ruleEngine) {
+        const payload = await this.buildPayload(node.id);
+        if (payload) {
+          const actions = await this.ruleEngine.evaluateAllRules(payload);
+          for (const action of actions) {
+            this.handleRuleAction(node.id, action);
+          }
+        }
+      }
 
     } catch (error) {
       clearTimeout(timeout);
@@ -342,6 +358,121 @@ export class StatsCollector extends EventEmitter {
     }
 
     return summary;
+  }
+
+  /**
+   * Set the rule engine for automated rule evaluation.
+   * Called from index.ts after both StatsCollector and RuleEngine are created.
+   */
+  setRuleEngine(engine: RuleEngine): void {
+    this.ruleEngine = engine;
+  }
+
+  /**
+   * Build a RulePayload for the given node.
+   * Used by js_query tool and rule evaluation.
+   */
+  async buildPayload(nodeId: string): Promise<RulePayload | null> {
+    const stats = this.getCurrentStats(nodeId);
+    if (!stats) return null;
+
+    let detections: Array<{
+      label: string;
+      confidence: number;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    }> = [];
+    let frameInfo = { number: 0, timestamp: new Date().toISOString(), width: 640, height: 480 };
+
+    try {
+      const node = this.nodeManager.getNode(nodeId);
+      if (node?.runtime?.port) {
+        const resp = await fetch(`http://${node.host || 'localhost'}:${node.runtime.port}/api/results`);
+        if (resp.ok) {
+          const data = await resp.json() as {
+            detections?: Array<{
+              label?: string;
+              confidence?: number;
+              x?: number;
+              y?: number;
+              w?: number;
+              h?: number;
+            }>;
+            frame_number?: number;
+          };
+          detections = (data.detections || []).map((d) => ({
+            label: d.label || 'unknown',
+            confidence: d.confidence || 0,
+            x: d.x || 0,
+            y: d.y || 0,
+            w: d.w || 0,
+            h: d.h || 0,
+          }));
+          frameInfo.number = data.frame_number || 0;
+        }
+      }
+    } catch {
+      // Runtime not reachable — use empty detections
+    }
+
+    const daily = await this.getDailySummary();
+    const nodeSummary = daily[nodeId];
+    const hourly = nodeSummary?.hours?.map((h) => ({
+      hour: h.hourStart,
+      detections: h.detections,
+    })) || [];
+
+    // Calculate defects per hour (detections in last hour)
+    const now = new Date();
+    const recentDetections = this.recentDetections.get(nodeId);
+    let defectsPerHour = 0;
+    if (recentDetections) {
+      const elapsed = (now.getTime() - recentDetections.since.getTime()) / 1000 / 3600;
+      if (elapsed > 0) {
+        defectsPerHour = recentDetections.count / elapsed;
+      }
+    }
+
+    return {
+      detections,
+      frame: frameInfo,
+      stats: {
+        total_detections: stats.totalDetections,
+        by_label: stats.byLabel,
+        fps: stats.fps,
+        uptime_sec: stats.uptimeSec,
+        defects_per_hour: defectsPerHour,
+      },
+      hourly,
+      node: { id: nodeId, status: stats.modelLoaded ? 'running' : 'offline' },
+      // signals: {} — reserved for Spec C, leave undefined
+    };
+  }
+
+  /**
+   * Handle a rule action by dispatching to appropriate channels.
+   */
+  private handleRuleAction(nodeId: string, action: RuleAction): void {
+    switch (action.action) {
+      case 'reject':
+      case 'alert':
+        this.emit('rule-action', { nodeId, ...action });
+        logger.warn(`Rule action [${action.action}]: ${action.reason || action.message}`);
+        break;
+      case 'modbus_write':
+        if (action.register !== undefined && action.value !== undefined) {
+          this.emit('modbus-write', { register: action.register, value: action.value });
+        }
+        break;
+      case 'log':
+        logger.info(`Rule log: ${action.message}`);
+        break;
+      case 'pass':
+        // No action needed
+        break;
+    }
   }
 }
 
