@@ -360,7 +360,7 @@ function switchToDirectConnect() {
 }
 
 .card {
-  background: white;
+  background: #1E293B;
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -397,33 +397,35 @@ function switchToDirectConnect() {
 
 .mode-toggle {
   padding: 6px 12px;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background: #334155;
+  border: 1px solid #475569;
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.75rem;
+  color: #94A3B8;
   transition: all 0.2s;
 }
 
 .mode-toggle:hover {
-  background: #e2e8f0;
+  background: #475569;
+  color: #E2E8F0;
 }
 
 .mode-toggle.active {
-  background: #2563eb;
+  background: #6366F1;
   color: white;
-  border-color: #2563eb;
+  border-color: #6366F1;
 }
 
 .direct-connect {
   padding: 16px;
-  background: #f8fafc;
+  background: #0F172A;
   border-radius: 8px;
 }
 
 .direct-hint {
   font-size: 0.875rem;
-  color: #64748b;
+  color: #94A3B8;
   margin-bottom: 16px;
 }
 
@@ -447,25 +449,27 @@ function switchToDirectConnect() {
 .input-group label {
   font-size: 0.75rem;
   font-weight: 500;
-  color: #475569;
+  color: #94A3B8;
 }
 
 .input-group input {
   padding: 8px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #475569;
   border-radius: 6px;
   font-size: 0.875rem;
+  background: #1E293B;
+  color: #E2E8F0;
 }
 
 .input-group input:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #6366F1;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .connect-btn {
   padding: 8px 20px;
-  background: #2563eb;
+  background: #6366F1;
   color: white;
   border: none;
   border-radius: 6px;
@@ -489,7 +493,7 @@ function switchToDirectConnect() {
   padding: 6px 12px;
   background: none;
   border: none;
-  color: #2563eb;
+  color: #6366F1;
   cursor: pointer;
   font-size: 0.875rem;
   text-decoration: underline;
@@ -510,30 +514,32 @@ function switchToDirectConnect() {
   flex-direction: column;
   align-items: flex-start;
   padding: 12px 16px;
-  background: #f1f5f9;
+  background: #334155;
   border: 2px solid transparent;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
+  color: #E2E8F0;
 }
 
 .device-btn:hover {
-  background: #e2e8f0;
+  background: #475569;
 }
 
 .device-btn.active {
-  background: #eff6ff;
-  border-color: #2563eb;
+  background: #1E293B;
+  border-color: #6366F1;
 }
 
 .device-name {
   font-weight: 600;
   font-size: 0.875rem;
+  color: #E2E8F0;
 }
 
 .device-host {
   font-size: 0.75rem;
-  color: #64748b;
+  color: #94A3B8;
 }
 
 .status-bar {
@@ -541,10 +547,12 @@ function switchToDirectConnect() {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: #f0fdf4;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid #10B981;
   border-radius: 8px;
   margin-bottom: 16px;
   font-size: 0.875rem;
+  color: #10B981;
 }
 
 .status-indicator {
@@ -595,19 +603,20 @@ function switchToDirectConnect() {
   justify-content: space-between;
   align-items: center;
   padding: 16px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: #0F172A;
+  border: 1px solid #334155;
   border-radius: 8px;
   transition: all 0.2s;
 }
 
 .camera-item:hover {
-  background: #f1f5f9;
+  background: #1E293B;
+  border-color: #475569;
 }
 
 .camera-item.active {
-  background: #f0fdf4;
-  border-color: #22c55e;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: #10B981;
 }
 
 .camera-info {
@@ -638,7 +647,7 @@ function switchToDirectConnect() {
 
 .start-btn {
   padding: 8px 20px;
-  background: #2563eb;
+  background: #6366F1;
   color: white;
   border: none;
   border-radius: 6px;
@@ -658,15 +667,15 @@ function switchToDirectConnect() {
 
 .refresh-btn {
   padding: 6px 16px;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background: #334155;
+  border: 1px solid #334155;
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.875rem;
 }
 
 .refresh-btn:hover:not(:disabled) {
-  background: #e2e8f0;
+  background: #334155;
 }
 
 .refresh-btn:disabled {
@@ -692,8 +701,8 @@ function switchToDirectConnect() {
 .spinner {
   width: 20px;
   height: 20px;
-  border: 2px solid #e2e8f0;
-  border-top-color: #2563eb;
+  border: 2px solid #334155;
+  border-top-color: #6366F1;
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }

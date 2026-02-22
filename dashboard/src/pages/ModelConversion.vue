@@ -219,7 +219,7 @@ h1 {
 }
 
 .panel-section {
-  background: white;
+  background: #1E293B;
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -229,7 +229,7 @@ h1 {
   font-size: 1.25rem;
   font-weight: 600;
   margin-bottom: 20px;
-  color: #1e293b;
+  color: #E2E8F0;
 }
 
 .panel-section h3 {
@@ -255,7 +255,7 @@ h1 {
 .form-group select {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 6px;
   font-size: 0.9rem;
 }
@@ -263,13 +263,13 @@ h1 {
 .form-group input:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #6366F1;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .form-group input:disabled,
 .form-group select:disabled {
-  background: #f1f5f9;
+  background: #334155;
   cursor: not-allowed;
 }
 
@@ -292,7 +292,7 @@ h1 {
 .convert-btn {
   width: 100%;
   padding: 12px 20px;
-  background: #2563eb;
+  background: #6366F1;
   color: white;
   border: none;
   border-radius: 6px;
@@ -360,7 +360,7 @@ h1 {
 
 .progress-fill {
   height: 100%;
-  background: #2563eb;
+  background: #6366F1;
   transition: width 0.3s;
 }
 
@@ -374,7 +374,7 @@ h1 {
 }
 
 .info-section {
-  background: #f8fafc;
+  background: #0F172A;
 }
 
 .info-section ul {
@@ -389,14 +389,14 @@ h1 {
 }
 
 .info-section code {
-  background: #e2e8f0;
+  background: #334155;
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.8rem;
 }
 
 .info-section a {
-  color: #2563eb;
+  color: #6366F1;
 }
 
 @media (max-width: 900px) {

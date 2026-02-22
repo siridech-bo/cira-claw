@@ -124,6 +124,12 @@ async function checkConnection() {
 </template>
 
 <style>
+/* CiRA ME Theme Colors */
+/* Primary: #6366F1 (Indigo) */
+/* Secondary: #22D3EE (Cyan) */
+/* Background: #0F172A (Dark Slate) */
+/* Success: #10B981 */
+
 .app {
   display: flex;
   min-height: 100vh;
@@ -131,17 +137,22 @@ async function checkConnection() {
 
 .sidebar {
   width: 240px;
-  background: #1e293b;
+  background: #0F172A;
   color: white;
   display: flex;
   flex-direction: column;
   padding: 20px;
+  border-right: 1px solid #1E293B;
 }
 
 .logo h1 {
   font-size: 1.5rem;
   font-weight: 600;
   margin-bottom: 4px;
+  background: linear-gradient(135deg, #6366F1 0%, #22D3EE 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .logo .status {
@@ -150,7 +161,7 @@ async function checkConnection() {
 }
 
 .logo .status.online {
-  color: #4ade80;
+  color: #10B981;
 }
 
 .logo .status::before {
@@ -177,12 +188,12 @@ async function checkConnection() {
 }
 
 .nav-link:hover {
-  background: #334155;
+  background: #1E293B;
   color: white;
 }
 
 .nav-link.router-link-active {
-  background: #2563eb;
+  background: #6366F1;
   color: white;
 }
 
@@ -193,18 +204,19 @@ async function checkConnection() {
 .sidebar-footer {
   margin-top: auto;
   padding-top: 20px;
-  border-top: 1px solid #334155;
+  border-top: 1px solid #1E293B;
 }
 
 .node-count {
   font-size: 0.875rem;
-  color: #94a3b8;
+  color: #22D3EE;
 }
 
 .content {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  background: #0F172A;
 }
 
 /* Utility Menu Styles */
@@ -231,12 +243,12 @@ async function checkConnection() {
 }
 
 .nav-toggle:hover {
-  background: #334155;
+  background: #1E293B;
   color: white;
 }
 
 .nav-toggle.active {
-  color: #60a5fa;
+  color: #22D3EE;
 }
 
 .nav-toggle .arrow {

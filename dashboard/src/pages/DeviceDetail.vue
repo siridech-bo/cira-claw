@@ -414,14 +414,14 @@ function formatUptime(seconds: number | null | undefined): string {
 .back-btn {
   padding: 8px 12px;
   background: none;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 6px;
   cursor: pointer;
   color: #64748b;
 }
 
 .back-btn:hover {
-  background: #f1f5f9;
+  background: #334155;
 }
 
 .page-header h2 {
@@ -469,27 +469,27 @@ function formatUptime(seconds: number | null | undefined): string {
   font-size: 0.875rem;
   color: #64748b;
   padding: 12px 16px;
-  background: white;
+  background: #1E293B;
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .stream-mode-selector select {
   padding: 6px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 6px;
-  background: white;
+  background: #1E293B;
   font-size: 0.875rem;
   cursor: pointer;
 }
 
 .stream-mode-selector select:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #6366F1;
 }
 
 .stream-container {
-  background: white;
+  background: #1E293B;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -497,10 +497,11 @@ function formatUptime(seconds: number | null | undefined): string {
 
 .stream-container h3 {
   padding: 12px 16px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  background: #0F172A;
+  border-bottom: 1px solid #334155;
   font-size: 0.875rem;
   font-weight: 600;
+  color: #E2E8F0;
 }
 
 .stream-image {
@@ -512,8 +513,8 @@ function formatUptime(seconds: number | null | undefined): string {
 .stream-offline {
   padding: 60px 20px;
   text-align: center;
-  color: #64748b;
-  background: #f1f5f9;
+  color: #94A3B8;
+  background: #0F172A;
 }
 
 .info-section {
@@ -524,7 +525,7 @@ function formatUptime(seconds: number | null | undefined): string {
 }
 
 .info-card {
-  background: white;
+  background: #1E293B;
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -572,7 +573,7 @@ function formatUptime(seconds: number | null | undefined): string {
   display: flex;
   justify-content: space-between;
   padding: 8px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid #334155;
 }
 
 .info-row:last-child {
@@ -600,7 +601,7 @@ function formatUptime(seconds: number | null | undefined): string {
 
 .action-btn {
   padding: 10px 20px;
-  background: #2563eb;
+  background: #6366F1;
   color: white;
   border: none;
   border-radius: 6px;
@@ -627,7 +628,7 @@ function formatUptime(seconds: number | null | undefined): string {
 
 /* Model Management Styles */
 .model-card {
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  background: linear-gradient(135deg, #1E293B 0%, #334155 100%);
 }
 
 .model-selector {
@@ -640,21 +641,21 @@ function formatUptime(seconds: number | null | undefined): string {
 .model-selector select {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 6px;
   font-size: 0.875rem;
-  background: white;
+  background: #1E293B;
   cursor: pointer;
 }
 
 .model-selector select:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #6366F1;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .model-selector select:disabled {
-  background: #f1f5f9;
+  background: #334155;
   cursor: not-allowed;
 }
 
@@ -665,26 +666,26 @@ function formatUptime(seconds: number | null | undefined): string {
 .manual-path input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 6px;
   font-size: 0.875rem;
-  background: white;
+  background: #1E293B;
 }
 
 .manual-path input:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #6366F1;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .manual-path input:disabled {
-  background: #f1f5f9;
+  background: #334155;
   cursor: not-allowed;
 }
 
 .switch-btn {
   padding: 10px 20px;
-  background: #2563eb;
+  background: #6366F1;
   color: white;
   border: none;
   border-radius: 6px;

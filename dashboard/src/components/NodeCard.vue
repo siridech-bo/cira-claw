@@ -130,7 +130,7 @@ function formatUptime(seconds: number | null | undefined): string {
 <style scoped>
 .node-card {
   display: block;
-  background: white;
+  background: #1E293B;
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   text-decoration: none;
@@ -149,8 +149,8 @@ function formatUptime(seconds: number | null | undefined): string {
   justify-content: space-between;
   align-items: flex-start;
   padding: 16px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  background: #0F172A;
+  border-bottom: 1px solid #334155;
 }
 
 .device-info {
@@ -167,11 +167,12 @@ function formatUptime(seconds: number | null | undefined): string {
   font-size: 1rem;
   font-weight: 600;
   margin: 0;
+  color: #E2E8F0;
 }
 
 .device-type {
   font-size: 0.75rem;
-  color: #64748b;
+  color: #94A3B8;
 }
 
 .status-badge {
@@ -208,7 +209,7 @@ function formatUptime(seconds: number | null | undefined): string {
   display: block;
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1e293b;
+  color: #E2E8F0;
 }
 
 .metric-value.warning {
@@ -231,10 +232,10 @@ function formatUptime(seconds: number | null | undefined): string {
   display: flex;
   justify-content: space-between;
   padding: 12px 16px;
-  background: #f8fafc;
-  border-top: 1px solid #e2e8f0;
+  background: #0F172A;
+  border-top: 1px solid #334155;
   font-size: 0.75rem;
-  color: #64748b;
+  color: #94A3B8;
 }
 
 .host {

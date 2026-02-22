@@ -135,7 +135,7 @@ async function fetchNodes() {
 
 .refresh-btn {
   padding: 8px 16px;
-  background: #2563eb;
+  background: #6366F1;
   color: white;
   border: none;
   border-radius: 6px;
@@ -160,7 +160,7 @@ async function fetchNodes() {
 }
 
 .summary-card {
-  background: white;
+  background: #1E293B;
   padding: 20px;
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -169,7 +169,7 @@ async function fetchNodes() {
 .summary-value {
   font-size: 2rem;
   font-weight: 700;
-  color: #1e293b;
+  color: #E2E8F0;
 }
 
 .summary-label {

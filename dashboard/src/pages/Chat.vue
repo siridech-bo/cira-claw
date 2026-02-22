@@ -295,7 +295,7 @@ function handleKeydown(event: KeyboardEvent) {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: white;
+  background: #1E293B;
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   overflow: hidden;
@@ -325,7 +325,7 @@ function handleKeydown(event: KeyboardEvent) {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #f1f5f9;
+  background: #334155;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -334,7 +334,7 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 .message.user .message-avatar {
-  background: #2563eb;
+  background: #6366F1;
 }
 
 .message-content {
@@ -346,13 +346,14 @@ function handleKeydown(event: KeyboardEvent) {
 .message-text {
   padding: 12px 16px;
   border-radius: 12px;
-  background: #f1f5f9;
+  background: #334155;
+  color: #E2E8F0;
   white-space: pre-wrap;
   line-height: 1.5;
 }
 
 .message.user .message-text {
-  background: #2563eb;
+  background: #6366F1;
   color: white;
 }
 
@@ -389,7 +390,7 @@ function handleKeydown(event: KeyboardEvent) {
   display: flex;
   gap: 4px;
   padding: 12px 16px;
-  background: #f1f5f9;
+  background: #334155;
   border-radius: 12px;
 }
 
@@ -413,28 +414,30 @@ function handleKeydown(event: KeyboardEvent) {
   display: flex;
   gap: 12px;
   padding: 16px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid #334155;
 }
 
 .input-area textarea {
   flex: 1;
   padding: 12px 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 8px;
   resize: none;
   font-family: inherit;
   font-size: 0.875rem;
   line-height: 1.5;
+  background: #0F172A;
+  color: #E2E8F0;
 }
 
 .input-area textarea:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #6366F1;
 }
 
 .input-area button {
   padding: 12px 24px;
-  background: #2563eb;
+  background: #6366F1;
   color: white;
   border: none;
   border-radius: 8px;

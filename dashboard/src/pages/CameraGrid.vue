@@ -178,22 +178,22 @@ function handleStreamError(nodeId: string, msg: string) {
 
 .mode-selector select {
   padding: 6px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 6px;
-  background: white;
+  background: #1E293B;
   font-size: 0.875rem;
   cursor: pointer;
 }
 
 .mode-selector select:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #6366F1;
 }
 
 .grid-controls {
   display: flex;
   gap: 4px;
-  background: #e2e8f0;
+  background: #1E293B;
   padding: 4px;
   border-radius: 8px;
 }
@@ -205,13 +205,13 @@ function handleStreamError(nodeId: string, msg: string) {
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.875rem;
-  color: #64748b;
+  color: #94A3B8;
 }
 
 .grid-controls button.active {
-  background: white;
-  color: #1e293b;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  background: #6366F1;
+  color: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .loading {
@@ -235,7 +235,7 @@ function handleStreamError(nodeId: string, msg: string) {
 
 .camera-cell {
   position: relative;
-  background: #1e293b;
+  background: #0F172A;
   border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 16/9;

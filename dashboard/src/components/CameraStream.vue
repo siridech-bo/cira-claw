@@ -272,7 +272,7 @@ defineExpose({
   position: relative;
   width: 100%;
   height: 100%;
-  background: #1e293b;
+  background: #0F172A;
   overflow: hidden;
 }
 
@@ -322,7 +322,7 @@ defineExpose({
 }
 
 .mode-indicator.mjpeg {
-  color: #4ade80;
+  color: #10B981;
 }
 
 .mode-indicator.polling {
@@ -359,6 +359,6 @@ defineExpose({
 }
 
 .reconnect-btn:hover {
-  background: #2563eb;
+  background: #6366F1;
 }
 </style>

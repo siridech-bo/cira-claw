@@ -615,7 +615,7 @@ function selectNode(node: Node) {
   align-items: center;
   gap: 24px;
   padding: 16px 20px;
-  background: white;
+  background: #1E293B;
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
@@ -633,14 +633,14 @@ function selectNode(node: Node) {
 
 .control-group select {
   padding: 6px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 6px;
   font-size: 0.875rem;
 }
 
 .source-toggle {
   display: flex;
-  background: #f1f5f9;
+  background: #334155;
   border-radius: 6px;
   padding: 2px;
 }
@@ -652,12 +652,14 @@ function selectNode(node: Node) {
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.875rem;
+  color: #94A3B8;
   transition: all 0.2s;
 }
 
 .source-toggle button.active {
-  background: white;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  background: #6366F1;
+  color: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 /* Main Grid */
@@ -670,7 +672,7 @@ function selectNode(node: Node) {
 
 /* Panels */
 .panel {
-  background: white;
+  background: #1E293B;
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   display: flex;
@@ -683,18 +685,19 @@ function selectNode(node: Node) {
   justify-content: space-between;
   align-items: center;
   padding: 16px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid #334155;
 }
 
 .panel-header h3 {
   font-size: 0.875rem;
   font-weight: 600;
+  color: #E2E8F0;
 }
 
 .image-counter {
   font-size: 0.75rem;
-  color: #64748b;
-  background: #f1f5f9;
+  color: #94A3B8;
+  background: #334155;
   padding: 4px 8px;
   border-radius: 4px;
 }
@@ -716,7 +719,7 @@ function selectNode(node: Node) {
 .browse-btn {
   width: 100%;
   padding: 12px;
-  background: #2563eb;
+  background: #6366F1;
   color: white;
   border: none;
   border-radius: 8px;
@@ -738,7 +741,7 @@ function selectNode(node: Node) {
 .path-bar input {
   flex: 1;
   padding: 8px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 6px;
   font-size: 0.75rem;
   font-family: monospace;
@@ -747,8 +750,8 @@ function selectNode(node: Node) {
 .up-btn,
 .go-btn {
   padding: 8px 12px;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background: #334155;
+  border: 1px solid #334155;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -772,16 +775,16 @@ function selectNode(node: Node) {
 }
 
 .file-item:hover {
-  background: #f1f5f9;
+  background: #334155;
 }
 
 .file-item.active {
-  background: #eff6ff;
-  border: 1px solid #2563eb;
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid #6366F1;
 }
 
 .file-item.folder {
-  color: #2563eb;
+  color: #6366F1;
 }
 
 .file-icon {
@@ -804,7 +807,7 @@ function selectNode(node: Node) {
 .preview-container {
   flex: 1;
   position: relative;
-  background: #1e293b;
+  background: #0F172A;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -857,13 +860,13 @@ function selectNode(node: Node) {
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid #334155;
 }
 
 .play-btn {
   padding: 8px 16px;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background: #334155;
+  border: 1px solid #334155;
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.875rem;
@@ -884,7 +887,7 @@ function selectNode(node: Node) {
 
 .interval-control select {
   padding: 4px 8px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 4px;
   font-size: 0.75rem;
 }
@@ -920,8 +923,8 @@ function selectNode(node: Node) {
 .spinner {
   width: 20px;
   height: 20px;
-  border: 2px solid #e2e8f0;
-  border-top-color: #2563eb;
+  border: 2px solid #334155;
+  border-top-color: #6366F1;
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -965,7 +968,7 @@ function selectNode(node: Node) {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: #f8fafc;
+  background: #1E293B;
   border-radius: 6px;
 }
 
@@ -978,7 +981,7 @@ function selectNode(node: Node) {
 .confidence-bar {
   flex: 1;
   height: 8px;
-  background: #e2e8f0;
+  background: #334155;
   border-radius: 4px;
   overflow: hidden;
 }
