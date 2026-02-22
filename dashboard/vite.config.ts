@@ -4,8 +4,8 @@ import vue from '@vitejs/plugin-vue';
 export default defineConfig({
   plugins: [vue()],
   server: {
-    port: 18790,
-    strictPort: true,
+    port: 3000,
+    strictPort: false,
     proxy: {
       // Proxy runtime APIs to the C runtime on port 8080
       '/api/nodes': 'http://localhost:8080',
@@ -24,6 +24,14 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
       },
+      // Proxy cira-edge gateway endpoints (chat, API)
+      '/chat': {
+        target: 'ws://localhost:18790',
+        ws: true,
+      },
+      '/api/status': 'http://localhost:18790',
+      '/api/rules': 'http://localhost:18790',
+      '/health': 'http://localhost:18790',
     },
   },
   build: {

@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { NodeSSH } from 'node-ssh';
 import { createLogger } from '../utils/logger.js';
+import { RuleEngine, RulePayload, SavedRule } from '../services/rule-engine.js';
 
 const logger = createLogger('tools');
 
@@ -54,6 +55,22 @@ export interface AlertsConfig {
   notify_channels: string[];
 }
 
+// ─── Spec D Stub — Heartbeat Scheduler (not yet implemented) ─────────────────
+// When Spec D lands, inject HeartbeatScheduler here.
+// Rule evaluation scheduling migrates from StatsCollector to this.
+export interface HeartbeatScheduler {
+  scheduleRuleEvaluation(nodeId: string, intervalMs: number): void;
+  // Full interface defined in Spec D
+}
+
+// ─── Spec E Stub — Memory Manager (not yet implemented) ──────────────────────
+// When Spec E lands, inject MemoryManager here.
+// Tool handlers that need memory context check this field before using it.
+export interface MemoryManager {
+  getContext(nodeId: string): Promise<string | null>;
+  // Full interface defined in Spec E
+}
+
 export interface ToolContext {
   nodeManager?: {
     getAllNodes: () => Array<{ id: string; name: string; host: string; type: string }>;
@@ -73,8 +90,14 @@ export interface ToolContext {
     getCurrentStats: (nodeId: string) => NodeStats | undefined;
     getAllCurrentStats: () => NodeStats[];
     getDailySummary: () => Promise<Record<string, { totalDetections: number; hours: AccumulatedStats[] }>>;
+    buildPayload: (nodeId: string) => Promise<RulePayload | null>;
   };
   alertsConfig?: AlertsConfig;
+  ruleEngine?: RuleEngine;
+  // Spec D stub — Heartbeat Scheduler (not yet implemented)
+  heartbeatScheduler?: HeartbeatScheduler;
+  // Spec E stub — Memory Manager (not yet implemented)
+  memoryManager?: MemoryManager;
 }
 
 // Tool definitions
@@ -230,6 +253,87 @@ const tools: Tool[] = [
         },
       },
       required: ['period'],
+    },
+  },
+  {
+    name: 'js_query',
+    description: 'Execute a one-shot JavaScript query against current detection data and stats. Use when the user asks a question requiring custom data analysis that other tools cannot answer. The code receives a "payload" object with detections, stats, and hourly data. Return the answer as the last expression.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: 'JavaScript code to execute. Has access to payload.detections (array of {label, confidence, x, y, w, h}), payload.stats ({total_detections, by_label, fps, uptime_sec, defects_per_hour}), payload.hourly (array of {hour, detections}). Must return a JSON-serializable value.',
+        },
+        node_id: {
+          type: 'string',
+          description: 'The node to query data from (default: "local-dev")',
+        },
+      },
+      required: ['code'],
+    },
+  },
+  {
+    name: 'js_rule_create',
+    description: 'Create a persistent JavaScript rule that runs automatically on each evaluation cycle. The code must export a function receiving "payload" and returning: { action: "pass"|"reject"|"alert"|"log"|"modbus_write", reason?: string, register?: number, value?: number, severity?: "info"|"warning"|"critical", message?: string }. Rule is dry-run validated before saving.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Short name (used as filename, lowercase-hyphenated)',
+        },
+        description: {
+          type: 'string',
+          description: 'Human-readable description of what this rule does',
+        },
+        code: {
+          type: 'string',
+          description: 'JavaScript as module.exports function. Example: module.exports = function(payload) { if (payload.detections.length > 5) return { action: "alert", message: "High defect count" }; return { action: "pass" }; }',
+        },
+        node_id: {
+          type: 'string',
+          description: 'Node this rule applies to (default: "local-dev")',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional tags for rule management e.g. ["reject-logic", "defect-rate"]',
+        },
+        signal_type: {
+          type: 'string',
+          enum: ['visual', 'vibration', 'current', 'any'],
+          description: 'Signal type this rule operates on (default: "visual")',
+        },
+      },
+      required: ['name', 'description', 'code'],
+    },
+  },
+  {
+    name: 'js_rule_list',
+    description: 'List, enable, disable, or delete persistent rules. Can filter by tag or signal_type.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['list', 'enable', 'disable', 'delete'],
+          description: 'Action to perform',
+        },
+        rule_id: {
+          type: 'string',
+          description: 'Rule ID (required for enable/disable/delete)',
+        },
+        filter_tag: {
+          type: 'string',
+          description: 'Optional: filter list by tag',
+        },
+        filter_signal_type: {
+          type: 'string',
+          description: 'Optional: filter list by signal_type',
+        },
+      },
+      required: ['action'],
     },
   },
 ];
@@ -842,6 +946,184 @@ export async function executeToolCall(
           alerts: [],
         },
       };
+    }
+
+    case 'js_query': {
+      const code = input.code as string;
+      const nodeId = (input.node_id as string) || 'local-dev';
+
+      if (!context?.ruleEngine) {
+        return { data: { error: 'Rule engine not available' } };
+      }
+
+      const payload = await context.statsCollector?.buildPayload(nodeId);
+      if (!payload) {
+        return { data: { error: 'No data available for node' } };
+      }
+
+      const result = await context.ruleEngine.executeQuery(code, payload);
+      return {
+        data: {
+          success: result.success,
+          result: result.result,
+          error: result.error,
+          execution_ms: result.execution_ms,
+          code: result.code,
+        },
+      };
+    }
+
+    case 'js_rule_create': {
+      const name = input.name as string;
+      const description = input.description as string;
+      const code = input.code as string;
+      const nodeId = (input.node_id as string) || 'local-dev';
+      const tags = (input.tags as string[]) || [];
+      const signal_type = (input.signal_type as string) || 'visual';
+
+      if (!context?.ruleEngine) {
+        return { data: { error: 'Rule engine not available' } };
+      }
+
+      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+      const payload = await context.statsCollector?.buildPayload(nodeId);
+      const testPayload: RulePayload = payload || {
+        detections: [],
+        frame: { number: 0, timestamp: new Date().toISOString(), width: 640, height: 480 },
+        stats: { total_detections: 0, by_label: {}, fps: 0, uptime_sec: 0, defects_per_hour: 0 },
+        hourly: [],
+        node: { id: nodeId, status: 'unknown' },
+      };
+
+      const rule: SavedRule = {
+        id,
+        name,
+        description,
+        code,
+        enabled: true,
+        created_at: new Date().toISOString(),
+        created_by: 'ai-agent',
+        node_id: nodeId,
+        tags,
+        signal_type,
+      };
+
+      const dryRun = await context.ruleEngine.evaluateRule(rule, testPayload);
+      if (!dryRun.success) {
+        return { data: { success: false, error: `Rule validation failed: ${dryRun.error}`, code } };
+      }
+
+      const validActions = ['pass', 'reject', 'alert', 'log', 'modbus_write'];
+      if (dryRun.action && !validActions.includes(dryRun.action.action)) {
+        return {
+          data: {
+            success: false,
+            error: `Rule must return valid action, got: ${dryRun.action?.action}`,
+            code,
+          },
+        };
+      }
+
+      context.ruleEngine.saveRule(rule);
+
+      return {
+        data: {
+          success: true,
+          rule_id: id,
+          name,
+          description,
+          tags,
+          signal_type,
+          dry_run_result: dryRun.action,
+          execution_ms: dryRun.execution_ms,
+          code,
+        },
+      };
+    }
+
+    case 'js_rule_list': {
+      const action = input.action as string;
+      const ruleId = input.rule_id as string | undefined;
+      const filterTag = input.filter_tag as string | undefined;
+      const filterSignalType = input.filter_signal_type as string | undefined;
+
+      if (!context?.ruleEngine) {
+        return { data: { error: 'Rule engine not available' } };
+      }
+
+      switch (action) {
+        case 'list': {
+          let rules = context.ruleEngine.loadRules();
+
+          // Apply filters
+          if (filterTag) {
+            rules = rules.filter(r => r.tags?.includes(filterTag));
+          }
+          if (filterSignalType) {
+            rules = rules.filter(r => r.signal_type === filterSignalType);
+          }
+
+          return {
+            data: {
+              rules: rules.map(r => ({
+                id: r.id,
+                name: r.name,
+                description: r.description,
+                enabled: r.enabled,
+                node_id: r.node_id,
+                tags: r.tags || [],
+                signal_type: r.signal_type || 'visual',
+                created_at: r.created_at,
+                created_by: r.created_by,
+              })),
+              count: rules.length,
+            },
+          };
+        }
+
+        case 'enable': {
+          if (!ruleId) {
+            return { data: { error: 'rule_id is required for enable action' } };
+          }
+          const success = context.ruleEngine.enableRule(ruleId, true);
+          return {
+            data: {
+              success,
+              message: success ? `Rule '${ruleId}' enabled` : `Rule '${ruleId}' not found`,
+            },
+          };
+        }
+
+        case 'disable': {
+          if (!ruleId) {
+            return { data: { error: 'rule_id is required for disable action' } };
+          }
+          const success = context.ruleEngine.enableRule(ruleId, false);
+          return {
+            data: {
+              success,
+              message: success ? `Rule '${ruleId}' disabled` : `Rule '${ruleId}' not found`,
+            },
+          };
+        }
+
+        case 'delete': {
+          if (!ruleId) {
+            return { data: { error: 'rule_id is required for delete action' } };
+          }
+          const success = context.ruleEngine.deleteRule(ruleId);
+          return {
+            data: {
+              success,
+              message: success ? `Rule '${ruleId}' deleted` : `Rule '${ruleId}' not found`,
+            },
+          };
+        }
+
+        default:
+          return { data: { error: `Unknown action: ${action}` } };
+      }
     }
 
     default:

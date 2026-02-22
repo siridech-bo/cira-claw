@@ -1,9 +1,17 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { NodeManager } from '../../nodes/manager.js';
 import { NodeConfig, NodeConfigSchema } from '../../utils/config-schema.js';
+import { RuleEngine } from '../../services/rule-engine.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('api-routes');
+
+// Module-level ruleEngine reference for rules API
+let _ruleEngine: RuleEngine | null = null;
+
+export function setRuleEngine(engine: RuleEngine): void {
+  _ruleEngine = engine;
+}
 
 interface NodeParams {
   id: string;
@@ -572,6 +580,174 @@ export async function registerApiRoutes(
           message: errorMessage,
         });
       }
+    }
+  );
+
+  // =====================
+  // Rules API Endpoints
+  // =====================
+
+  // List all rules
+  fastify.get('/api/rules', async (_request: FastifyRequest, reply: FastifyReply) => {
+    if (!_ruleEngine) {
+      return reply.status(503).send({
+        error: 'Rule engine not available',
+        message: 'Rule engine has not been initialized',
+      });
+    }
+
+    const rules = _ruleEngine.loadRules();
+    return { rules };
+  });
+
+  // Get single rule
+  fastify.get<{ Params: { id: string } }>(
+    '/api/rules/:id',
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (!_ruleEngine) {
+        return reply.status(503).send({
+          error: 'Rule engine not available',
+        });
+      }
+
+      const { id } = request.params;
+      const rules = _ruleEngine.loadRules();
+      const rule = rules.find(r => r.id === id);
+
+      if (!rule) {
+        return reply.status(404).send({
+          error: 'Rule not found',
+          message: `Rule with id '${id}' does not exist`,
+        });
+      }
+
+      return rule;
+    }
+  );
+
+  // Toggle rule enabled/disabled
+  fastify.post<{ Params: { id: string }; Body: { enabled: boolean } }>(
+    '/api/rules/:id/toggle',
+    async (
+      request: FastifyRequest<{ Params: { id: string }; Body: { enabled: boolean } }>,
+      reply: FastifyReply
+    ) => {
+      if (!_ruleEngine) {
+        return reply.status(503).send({
+          error: 'Rule engine not available',
+        });
+      }
+
+      const { id } = request.params;
+      const { enabled } = request.body;
+
+      const success = _ruleEngine.enableRule(id, enabled);
+
+      if (!success) {
+        return reply.status(404).send({
+          error: 'Rule not found',
+          message: `Rule with id '${id}' does not exist`,
+        });
+      }
+
+      logger.info(`Rule ${id} ${enabled ? 'enabled' : 'disabled'} via API`);
+      return { success: true, id, enabled };
+    }
+  );
+
+  // Delete rule
+  fastify.delete<{ Params: { id: string } }>(
+    '/api/rules/:id',
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (!_ruleEngine) {
+        return reply.status(503).send({
+          error: 'Rule engine not available',
+        });
+      }
+
+      const { id } = request.params;
+      const success = _ruleEngine.deleteRule(id);
+
+      if (!success) {
+        return reply.status(404).send({
+          error: 'Rule not found',
+          message: `Rule with id '${id}' does not exist`,
+        });
+      }
+
+      logger.info(`Rule ${id} deleted via API`);
+      return { success: true, id };
+    }
+  );
+
+  // Update rule code
+  fastify.put<{ Params: { id: string }; Body: { code: string } }>(
+    '/api/rules/:id',
+    async (
+      request: FastifyRequest<{ Params: { id: string }; Body: { code: string } }>,
+      reply: FastifyReply
+    ) => {
+      if (!_ruleEngine) {
+        return reply.status(503).send({
+          error: 'Rule engine not available',
+        });
+      }
+
+      const { id } = request.params;
+      const { code } = request.body;
+
+      if (!code || typeof code !== 'string') {
+        return reply.status(400).send({
+          error: 'Invalid request',
+          message: 'Request body must include "code" string',
+        });
+      }
+
+      // Find existing rule
+      const rules = _ruleEngine.loadRules();
+      const existingRule = rules.find(r => r.id === id);
+
+      if (!existingRule) {
+        return reply.status(404).send({
+          error: 'Rule not found',
+          message: `Rule with id '${id}' does not exist`,
+        });
+      }
+
+      // Dry-run the code to validate it works
+      const testPayload = {
+        detections: [{ label: 'test', confidence: 0.9, x: 0.1, y: 0.1, w: 0.2, h: 0.2 }],
+        frame: { number: 1, timestamp: new Date().toISOString(), width: 1920, height: 1080 },
+        stats: { total_detections: 10, by_label: { test: 10 }, fps: 30, uptime_sec: 100, defects_per_hour: 5 },
+        hourly: [{ hour: '10:00', detections: 5 }],
+        node: { id: 'local-dev', status: 'online' },
+      };
+
+      const testRule = { ...existingRule, code };
+
+      try {
+        const result = await _ruleEngine.evaluateRule(testRule, testPayload);
+        if (!result.success) {
+          return reply.status(400).send({
+            error: 'Code validation failed',
+            message: result.error || 'Rule code failed dry-run test',
+          });
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        return reply.status(400).send({
+          error: 'Code validation failed',
+          message: errorMessage,
+        });
+      }
+
+      // Update and save the rule
+      existingRule.code = code;
+      existingRule.created_by = 'manual'; // Mark as user-edited
+      _ruleEngine.saveRule(existingRule);
+
+      logger.info(`Rule ${id} code updated via API`);
+      return { success: true, id, rule: existingRule };
     }
   );
 

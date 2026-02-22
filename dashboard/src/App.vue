@@ -83,6 +83,10 @@ async function checkConnection() {
           <span class="icon">💬</span>
           Chat
         </RouterLink>
+        <RouterLink to="/rules" class="nav-link">
+          <span class="icon">📜</span>
+          Rules
+        </RouterLink>
 
         <!-- Utility Menu with Submenu -->
         <div class="nav-group">

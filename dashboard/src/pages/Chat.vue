@@ -1,5 +1,15 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue';
+
+// Declare mermaid on window for TypeScript
+declare global {
+  interface Window {
+    mermaid?: {
+      initialize: (config: Record<string, unknown>) => void;
+      run: (config: { querySelector: string }) => Promise<void>;
+    };
+  }
+}
 
 interface Message {
   id: string;
@@ -183,6 +193,56 @@ function handleKeydown(event: KeyboardEvent) {
     sendMessage();
   }
 }
+
+/**
+ * Render message content with Mermaid diagrams and code blocks.
+ * Mermaid regex MUST run before generic code block regex.
+ */
+function renderContent(content: string): string {
+  let html = content;
+
+  // Strip <script> tags for XSS protection
+  html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+
+  // 1. Mermaid diagrams — MUST come first before generic code blocks
+  html = html.replace(
+    /```mermaid\n([\s\S]*?)```/g,
+    '<div class="mermaid" style="margin:12px 0;background:#1e293b;padding:16px;border-radius:8px;overflow-x:auto">$1</div>'
+  );
+
+  // 2. Generic code blocks — styled pre/code
+  html = html.replace(
+    /```(\w*)\n([\s\S]*?)```/g,
+    '<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;margin:8px 0;font-family:\'JetBrains Mono\',monospace"><code>$2</code></pre>'
+  );
+
+  // Convert newlines to <br> for plain text portions (preserving whitespace)
+  // But don't affect content inside <pre> or <div class="mermaid">
+  // Simple approach: just preserve whitespace with CSS (white-space: pre-wrap)
+
+  return html;
+}
+
+/**
+ * Trigger Mermaid rendering after DOM update.
+ */
+async function renderMermaid() {
+  await nextTick();
+  window.mermaid?.run({ querySelector: '.mermaid' });
+}
+
+// Watch for new assistant messages and render Mermaid diagrams
+watch(
+  () => messages.value.length,
+  (newLen, oldLen) => {
+    if (newLen > oldLen) {
+      const lastMessage = messages.value[newLen - 1];
+      if (lastMessage?.role === 'assistant') {
+        renderMermaid();
+      }
+    }
+  }
+);
 </script>
 
 <template>
@@ -207,7 +267,12 @@ function handleKeydown(event: KeyboardEvent) {
             {{ message.role === 'user' ? '👤' : '🤖' }}
           </div>
           <div class="message-content">
-            <div class="message-text">{{ message.content }}</div>
+            <div
+              v-if="message.role === 'assistant'"
+              class="message-text"
+              v-html="renderContent(message.content)"
+            ></div>
+            <div v-else class="message-text">{{ message.content }}</div>
             <div class="message-images" v-if="message.images?.length">
               <img
                 v-for="(img, i) in message.images"

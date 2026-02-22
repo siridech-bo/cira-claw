@@ -1,9 +1,10 @@
+import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getConfigLoader, ConfigLoader } from './config.js';
 import { createGatewayServer, GatewayServer } from './gateway/server.js';
-import { registerApiRoutes } from './gateway/routes/api.js';
+import { registerApiRoutes, setRuleEngine } from './gateway/routes/api.js';
 import { registerWebSocketRoutes, WebSocketHandler } from './gateway/websocket.js';
 import { registerChatRoutes } from './gateway/chat.js';
 import { getNodeManager, NodeManager } from './nodes/manager.js';
@@ -283,6 +284,7 @@ async function main(): Promise<void> {
     const configDir = path.join(os.homedir(), '.cira');
     const rulesDir = path.join(configDir, 'rules');
     ruleEngine = createRuleEngine(rulesDir);
+    setRuleEngine(ruleEngine); // Wire rule engine to API routes
     logger.info(`Rule engine initialized: ${rulesDir}`);
 
     // TEMPORARY — Spec D replaces this
@@ -299,6 +301,7 @@ async function main(): Promise<void> {
       nodeManager,
       statsCollector,
       alertsConfig: config.alerts,
+      ruleEngine,
     });
 
     // Initialize MODBUS server if enabled

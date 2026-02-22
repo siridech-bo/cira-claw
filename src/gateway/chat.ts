@@ -1,9 +1,10 @@
 import { FastifyInstance } from 'fastify';
 import { WebSocket } from 'ws';
 import { CiraAgent, AgentMessage } from '../agent/agent.js';
-import { ToolContext } from '../agent/tools.js';
+import { ToolContext, HeartbeatScheduler, MemoryManager } from '../agent/tools.js';
 import { NodeManager } from '../nodes/manager.js';
 import { StatsCollector } from '../services/stats-collector.js';
+import { RuleEngine } from '../services/rule-engine.js';
 import { AlertsConfig } from '../utils/config-schema.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -31,6 +32,11 @@ export interface ChatDependencies {
   nodeManager: NodeManager;
   statsCollector?: StatsCollector;
   alertsConfig?: AlertsConfig;
+  ruleEngine?: RuleEngine;
+  // Spec D stub — Heartbeat Scheduler (not yet implemented)
+  heartbeatScheduler?: HeartbeatScheduler;
+  // Spec E stub — Memory Manager (not yet implemented)
+  memoryManager?: MemoryManager;
 }
 
 export class ChatHandler {
@@ -39,6 +45,7 @@ export class ChatHandler {
   private nodeManager: NodeManager;
   private statsCollector?: StatsCollector;
   private alertsConfig?: AlertsConfig;
+  private ruleEngine?: RuleEngine;
   private conversationHistory: Map<WebSocket, AgentMessage[]> = new Map();
 
   constructor(deps: ChatDependencies) {
@@ -46,6 +53,7 @@ export class ChatHandler {
     this.nodeManager = deps.nodeManager;
     this.statsCollector = deps.statsCollector;
     this.alertsConfig = deps.alertsConfig;
+    this.ruleEngine = deps.ruleEngine;
   }
 
   handleConnection(socket: WebSocket): void {
@@ -131,6 +139,7 @@ export class ChatHandler {
             nodeManager: this.nodeManager as unknown as ToolContext['nodeManager'],
             statsCollector: this.statsCollector as unknown as ToolContext['statsCollector'],
             alertsConfig: this.alertsConfig,
+            ruleEngine: this.ruleEngine,
           });
 
           // Add assistant response to history
