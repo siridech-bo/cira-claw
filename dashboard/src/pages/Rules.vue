@@ -370,7 +370,7 @@ ${selectedRule.value.code}
 
 My modification request: ${prompt}
 
-Please update this rule using the js_rule tool. Keep the same rule ID "${selectedRule.value.id}" to overwrite the existing rule.`;
+Please update this rule using the js_rule_create tool. Keep the same rule ID "${selectedRule.value.id}" to overwrite the existing rule.`;
 
   if (ws?.readyState === WebSocket.OPEN) {
     aiSending.value = true;
