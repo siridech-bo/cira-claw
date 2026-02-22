@@ -127,26 +127,35 @@ export class RuleEngine {
     try {
       // Create isolate with 16MB memory limit
       const isolate = new ivm.Isolate({ memoryLimit: 16 });
+
+      // isolated-vm creates a clean V8 context with no Node.js globals.
+      // require, process, fs, and global are unavailable by default.
+      // Standard JS builtins (Math, JSON, Date, Array, etc.) are available.
       const context = await isolate.createContext();
 
-      // Wrap code: inject payload and execute
+      // Wrap code in IIFE and JSON.stringify the result.
+      // isolated-vm can only transfer primitives across boundaries,
+      // so we serialize the result to a string and parse it back.
       const wrappedCode = `
         const payload = ${JSON.stringify(payload)};
-        ${code}
+        JSON.stringify((function() { ${code} })());
       `;
 
       // Compile and run with 100ms timeout
       const script = await isolate.compileScript(wrappedCode);
-      const result = await script.run(context, { timeout: 100 });
+      const rawResult = await script.run(context, { timeout: 100 });
 
       // Dispose isolate
       isolate.dispose();
+
+      // Parse the JSON string result back to an object
+      const result = rawResult ? JSON.parse(rawResult as string) : undefined;
 
       const execution_ms = performance.now() - startTime;
 
       return {
         success: true,
-        result: result,
+        result,
         execution_ms,
         code,
       };
@@ -175,27 +184,33 @@ export class RuleEngine {
     try {
       // Create isolate with 8MB memory limit for rules
       const isolate = new ivm.Isolate({ memoryLimit: 8 });
+
+      // isolated-vm creates a clean V8 context with no Node.js globals.
+      // require, process, fs, and global are unavailable by default.
+      // Standard JS builtins (Math, JSON, Date, Array, etc.) are available.
       const context = await isolate.createContext();
 
-      // Wrap code: module.exports pattern
+      // Wrap code: module.exports pattern with JSON.stringify for result transfer.
+      // isolated-vm can only transfer primitives across boundaries,
+      // so we serialize the RuleAction to a string and parse it back.
       const wrappedCode = `
         const payload = ${JSON.stringify(payload)};
         const module = { exports: {} };
         ${rule.code}
-        module.exports(payload);
+        JSON.stringify(module.exports(payload));
       `;
 
       // Compile and run with 50ms timeout for rules
       const script = await isolate.compileScript(wrappedCode);
-      const result = await script.run(context, { timeout: 50 });
+      const rawResult = await script.run(context, { timeout: 50 });
 
       // Dispose isolate
       isolate.dispose();
 
-      const execution_ms = performance.now() - startTime;
+      // Parse the JSON string result back to a RuleAction
+      const action = rawResult ? JSON.parse(rawResult as string) as RuleAction : undefined;
 
-      // Validate result is a RuleAction
-      const action = result as RuleAction;
+      const execution_ms = performance.now() - startTime;
 
       return {
         success: true,
