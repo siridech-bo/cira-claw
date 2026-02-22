@@ -19,10 +19,13 @@ function toggleUtility() {
   utilityExpanded.value = !utilityExpanded.value;
 }
 
-let ws: WebSocket | null = null;
+let pollTimer: number | null = null;
 
 onMounted(() => {
-  connectWebSocket();
+  // Initial check
+  checkConnection();
+  // Start periodic connection check
+  pollTimer = window.setInterval(checkConnection, 5000);
   // Expand if already on utility route
   if (route.path.startsWith('/utility')) {
     utilityExpanded.value = true;
@@ -30,39 +33,30 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (ws) {
-    ws.close();
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
   }
 });
 
-function connectWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  ws = new WebSocket(`${protocol}//${host}/ws`);
-
-  ws.onopen = () => {
-    connected.value = true;
-  };
-
-  ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'connected' && msg.payload?.summary) {
-        nodeCount.value = msg.payload.summary.total;
+async function checkConnection() {
+  try {
+    const response = await fetch('/api/nodes');
+    if (response.ok) {
+      const data = await response.json();
+      connected.value = true;
+      // Count nodes from the array
+      if (Array.isArray(data)) {
+        nodeCount.value = data.length;
+      } else if (data.nodes && Array.isArray(data.nodes)) {
+        nodeCount.value = data.nodes.length;
       }
-    } catch (e) {
-      console.error('Failed to parse WS message:', e);
+    } else {
+      connected.value = false;
     }
-  };
-
-  ws.onclose = () => {
+  } catch (e) {
     connected.value = false;
-    setTimeout(connectWebSocket, 3000);
-  };
-
-  ws.onerror = () => {
-    connected.value = false;
-  };
+  }
 }
 </script>
 
@@ -105,6 +99,14 @@ function connectWebSocket() {
             <RouterLink to="/utility/model-conversion" class="nav-link sub-link">
               <span class="icon">🔄</span>
               Model Conversion
+            </RouterLink>
+            <RouterLink to="/utility/camera-manager" class="nav-link sub-link">
+              <span class="icon">📹</span>
+              Camera Manager
+            </RouterLink>
+            <RouterLink to="/utility/image-tester" class="nav-link sub-link">
+              <span class="icon">🖼️</span>
+              Image Tester
             </RouterLink>
           </div>
         </div>
@@ -256,7 +258,7 @@ function connectWebSocket() {
 }
 
 .submenu.expanded {
-  max-height: 200px;
+  max-height: 300px;
 }
 
 .sub-link {

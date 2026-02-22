@@ -39,6 +39,9 @@
 #include <ncnn/gpu.h>
 #endif
 
+/* Maximum output layers to store */
+#define NCNN_MAX_OUTPUT_LAYERS 8
+
 /* Internal NCNN model structure */
 struct ncnn_model_t {
     ncnn::Net net;
@@ -47,8 +50,10 @@ struct ncnn_model_t {
     int num_classes;
     bool use_vulkan;
 
-    /* YOLO output layer names */
-    char output_layer[64];
+    /* YOLO output layer names (stored from network at load time) */
+    char output_layers[NCNN_MAX_OUTPUT_LAYERS][64];
+    int num_output_layers;
+    int active_output_idx;  /* Index of the layer that works for extraction */
 };
 
 /* Helper: Check if path is a directory */
@@ -163,9 +168,10 @@ extern "C" int ncnn_load(cira_ctx* ctx, const char* model_path) {
     }
 
     /* Get input dimensions from network */
-    /* NCNN doesn't expose this directly, so we use defaults or parse from param */
-    model->input_w = 416;  /* Default YOLO input size */
-    model->input_h = 416;
+    /* NCNN doesn't expose this directly, so we use manifest values or defaults */
+    /* ctx->input_w/h may already be set from cira_model.json manifest by cira_load() */
+    model->input_w = (ctx->input_w > 0) ? ctx->input_w : 416;
+    model->input_h = (ctx->input_h > 0) ? ctx->input_h : 416;
 
     /* Try to detect input size from first blob */
     const std::vector<ncnn::Blob>& blobs = model->net.blobs();
@@ -178,8 +184,27 @@ extern "C" int ncnn_load(cira_ctx* ctx, const char* model_path) {
     /* Use labels already loaded by cira_load() */
     model->num_classes = ctx->num_labels;
 
-    /* Set default output layer name */
-    strcpy(model->output_layer, "output");
+    /* Store output layer names from the network */
+    model->num_output_layers = 0;
+    model->active_output_idx = -1;  /* Not yet determined */
+
+    /* First, add actual output names from the network */
+    const std::vector<const char*>& net_output_names = model->net.output_names();
+    for (size_t i = 0; i < net_output_names.size() && model->num_output_layers < NCNN_MAX_OUTPUT_LAYERS; i++) {
+        strncpy(model->output_layers[model->num_output_layers], net_output_names[i], 63);
+        model->output_layers[model->num_output_layers][63] = '\0';
+        model->num_output_layers++;
+    }
+
+    /* If no output layers found, add common fallback names */
+    if (model->num_output_layers == 0) {
+        const char* fallback_names[] = {"output", "output0", "detection_out", "Yolov3DetectionOutput", nullptr};
+        for (int i = 0; fallback_names[i] != nullptr && model->num_output_layers < NCNN_MAX_OUTPUT_LAYERS; i++) {
+            strncpy(model->output_layers[model->num_output_layers], fallback_names[i], 63);
+            model->output_layers[model->num_output_layers][63] = '\0';
+            model->num_output_layers++;
+        }
+    }
 
     /* Update context with model dimensions */
     ctx->input_w = model->input_w;
@@ -188,6 +213,21 @@ extern "C" int ncnn_load(cira_ctx* ctx, const char* model_path) {
     fprintf(stderr, "  Input size: %dx%d\n", model->input_w, model->input_h);
     fprintf(stderr, "  Classes: %d\n", model->num_classes);
     fprintf(stderr, "  Vulkan: %s\n", model->use_vulkan ? "enabled" : "disabled");
+
+    /* Print available input/output layer names for debugging */
+    const std::vector<const char*>& input_names = model->net.input_names();
+
+    fprintf(stderr, "  Input layers: ");
+    for (size_t i = 0; i < input_names.size(); i++) {
+        fprintf(stderr, "%s%s", input_names[i], i < input_names.size() - 1 ? ", " : "");
+    }
+    fprintf(stderr, "\n");
+
+    fprintf(stderr, "  Output layers (stored %d): ", model->num_output_layers);
+    for (int i = 0; i < model->num_output_layers; i++) {
+        fprintf(stderr, "%s%s", model->output_layers[i], i < model->num_output_layers - 1 ? ", " : "");
+    }
+    fprintf(stderr, "\n");
 
     /* Store model handle in context */
     ctx->model_handle = model;
@@ -254,19 +294,37 @@ extern "C" int ncnn_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, in
     /* Set input */
     ex.input("data", in);
 
-    /* Get output */
+    /* Get output using stored output layer names */
     ncnn::Mat out;
-    int ret = ex.extract(model->output_layer, out);
-    if (ret != 0) {
-        /* Try alternative output names */
-        ret = ex.extract("output0", out);
-        if (ret != 0) {
-            ret = ex.extract("detection_out", out);
-            if (ret != 0) {
-                cira_set_error(ctx, "Failed to extract NCNN output");
-                return CIRA_ERROR;
+    int ret = -1;
+
+    /* If we already found a working output layer, use it directly */
+    if (model->active_output_idx >= 0 && model->active_output_idx < model->num_output_layers) {
+        ret = ex.extract(model->output_layers[model->active_output_idx], out);
+        if (ret == 0 && (out.w > 0 || out.h > 0 || out.c > 0)) {
+            /* Still working, use it */
+        } else {
+            /* Reset and search again */
+            model->active_output_idx = -1;
+        }
+    }
+
+    /* Search through stored output layer names */
+    if (model->active_output_idx < 0) {
+        for (int i = 0; i < model->num_output_layers; i++) {
+            ret = ex.extract(model->output_layers[i], out);
+            if (ret == 0 && (out.w > 0 || out.h > 0 || out.c > 0)) {
+                model->active_output_idx = i;
+                fprintf(stderr, "NCNN: Using output layer '%s' (w=%d, h=%d, c=%d)\n",
+                        model->output_layers[i], out.w, out.h, out.c);
+                break;
             }
         }
+    }
+
+    if (ret != 0 || (out.w == 0 && out.h == 0 && out.c == 0)) {
+        cira_set_error(ctx, "Failed to extract NCNN output (no valid output layer found)");
+        return CIRA_ERROR;
     }
 
     /* Parse YOLO output using unified decoder types */

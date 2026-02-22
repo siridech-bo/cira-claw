@@ -82,6 +82,7 @@ struct cira_ctx {
 
     /* Streaming state */
     int camera_running;
+    int current_camera;     /* Currently active camera device ID (-1 if none) */
     int server_running;
     int server_port;
     pthread_t camera_thread;

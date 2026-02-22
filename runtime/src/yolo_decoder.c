@@ -47,11 +47,16 @@ static int cmp_score_desc(const void* a, const void* b) {
 
 /**
  * Decode YOLOv4/v3 output (anchor-based, per-scale)
- * Shape: [1, num_boxes, 5+num_classes] per scale
+ * Shape: [1, num_boxes, 5+num_classes] per scale (3D pre-decoded)
+ *
+ * TODO: Add 5D raw grid decoder for [1, grid_h, grid_w, num_anchors, 5+C] format.
+ *       Reference implementation in git history commit cd6e83b (onnx_loader.c lines ~770-980).
+ *       Would require anchor-based decoding with sigmoid activations.
  */
 static int decode_yolov4(const float* output, const int64_t* shape, int num_dims,
                          const yolo_decode_config_t* config,
                          yolo_detection_t* dets, int max_dets) {
+    /* Currently only supports 3D pre-decoded output. 5D raw grid returns -1. */
     if (num_dims < 3) return -1;
 
     int num_boxes = (int)shape[1];

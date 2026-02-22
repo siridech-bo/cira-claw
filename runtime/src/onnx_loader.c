@@ -667,7 +667,7 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
         if (output_tensors[i]) g_ort->ReleaseValue(output_tensors[i]);
     }
 
-    /* Step 6: Apply NMS across all scales (decoder already applied per-scale NMS) */
+    /* Step 6: Cross-scale NMS (decoder applies per-call NMS, this catches cross-scale overlaps) */
     if (ctx->nms_threshold > 0 && total_detections > 1) {
         total_detections = yolo_nms(detections, total_detections, ctx->nms_threshold);
     }

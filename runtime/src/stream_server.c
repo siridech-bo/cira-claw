@@ -28,8 +28,10 @@
 #ifdef _WIN32
 #include <windows.h>
 #define usleep(x) Sleep((x) / 1000)
+#define strcasecmp _stricmp
 #else
 #include <unistd.h>
+#include <strings.h>
 #endif
 
 /* JPEG encoder functions (from jpeg_encoder.cpp) */
@@ -224,6 +226,10 @@ static ssize_t stream_callback(void* cls, uint64_t pos, char* buf, size_t max) {
 
         if (sctx->annotated) {
             ret = jpeg_encode_annotated(sctx->ctx, frame, w, h, 80, &jpeg_ptr, &jpeg_size);
+            /* Fallback to raw encoding if annotated fails */
+            if (ret != CIRA_OK || !jpeg_ptr || jpeg_size == 0) {
+                ret = jpeg_encode(frame, w, h, 80, &jpeg_ptr, &jpeg_size);
+            }
         } else {
             ret = jpeg_encode(frame, w, h, 80, &jpeg_ptr, &jpeg_size);
         }
@@ -1068,6 +1074,394 @@ static int handle_frame_latest(struct MHD_Connection* conn, cira_ctx* ctx) {
 }
 
 /**
+ * Handle GET /api/cameras - enumerate available camera devices.
+ */
+static int handle_cameras_list(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char response[MAX_RESPONSE_SIZE];
+    char* p = response;
+    char* end = response + sizeof(response) - 256;
+
+    p += snprintf(p, end - p, "{\"cameras\":[");
+
+    int count = 0;
+
+#ifdef _WIN32
+    /* Windows: Check DirectShow devices via OpenCV device indices */
+    /* We probe device indices 0-9 (OpenCV style) */
+    for (int i = 0; i < 10 && p < end - 128; i++) {
+        char dev_path[64];
+        snprintf(dev_path, sizeof(dev_path), "%d", i);
+        /* On Windows we can't easily enumerate without opening, so just list indices */
+        if (i < 4) {  /* List first 4 potential cameras */
+            if (count > 0) p += snprintf(p, end - p, ",");
+            p += snprintf(p, end - p, "{\"id\":%d,\"name\":\"Camera %d\",\"path\":\"%d\"}",
+                         i, i, i);
+            count++;
+        }
+    }
+#else
+    /* Linux: Enumerate /dev/video* devices */
+    DIR* d = opendir("/dev");
+    if (d) {
+        struct dirent* entry;
+        while ((entry = readdir(d)) != NULL && p < end - 128) {
+            if (strncmp(entry->d_name, "video", 5) == 0) {
+                int dev_num = atoi(entry->d_name + 5);
+                char dev_path[64];
+                snprintf(dev_path, sizeof(dev_path), "/dev/%s", entry->d_name);
+
+                /* Check if device is readable */
+                struct stat st;
+                if (stat(dev_path, &st) == 0 && S_ISCHR(st.st_mode)) {
+                    if (count > 0) p += snprintf(p, end - p, ",");
+                    p += snprintf(p, end - p, "{\"id\":%d,\"name\":\"%s\",\"path\":\"%s\"}",
+                                 dev_num, entry->d_name, dev_path);
+                    count++;
+                }
+            }
+        }
+        closedir(d);
+    }
+#endif
+
+    /* Add info about current camera */
+    int current_camera = -1;
+    int camera_running = 0;
+    if (ctx) {
+        camera_running = ctx->camera_running;
+        current_camera = ctx->current_camera;
+    }
+
+    p += snprintf(p, end - p, "],\"count\":%d,\"current\":%d,\"running\":%s}",
+                 count, current_camera, camera_running ? "true" : "false");
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
+ * Handle GET /api/nodes/:id - return detailed node information.
+ * For standalone mode, only "local" is a valid node ID.
+ */
+static int handle_node_detail(struct MHD_Connection* conn, cira_ctx* ctx, const char* node_id) {
+    char response[4096];
+    char timestamp[32];
+    get_timestamp(timestamp, sizeof(timestamp));
+
+    /* Only support "local" node ID in standalone mode */
+    if (strcmp(node_id, "local") != 0) {
+        const char* error = "{\"error\":\"Node not found\"}";
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_NOT_FOUND, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    /* Get the port from server state */
+    int port = 8080;
+    if (g_server) {
+        port = g_server->port;
+    }
+
+    /* Calculate uptime */
+    time_t now = time(NULL);
+    long uptime_sec = ctx ? (long)(now - ctx->start_time) : 0;
+
+    /* Get model name */
+    const char* model_name = "none";
+    if (ctx && ctx->format == CIRA_FORMAT_ONNX) model_name = "ONNX Model";
+    else if (ctx && ctx->format == CIRA_FORMAT_NCNN) model_name = "NCNN Model";
+    else if (ctx && ctx->format == CIRA_FORMAT_DARKNET) model_name = "Darknet Model";
+    else if (ctx && ctx->format == CIRA_FORMAT_TENSORRT) model_name = "TensorRT Model";
+
+    /* Build detailed node info */
+    snprintf(response, sizeof(response),
+        "{"
+        "\"id\":\"local\","
+        "\"name\":\"Local Runtime\","
+        "\"type\":\"edge\","
+        "\"host\":\"localhost\","
+        "\"status\":\"online\","
+        "\"lastSeen\":\"%s\","
+        "\"runtime\":{"
+            "\"port\":%d,"
+            "\"config\":\"standalone\""
+        "},"
+        "\"metrics\":{"
+            "\"fps\":%.1f,"
+            "\"temperature\":%.1f,"
+            "\"cpuUsage\":%.1f,"
+            "\"memoryUsage\":%.1f,"
+            "\"uptime\":%ld"
+        "},"
+        "\"inference\":{"
+            "\"modelName\":\"%s\","
+            "\"defectsTotal\":%llu,"
+            "\"defectsPerHour\":%.1f,"
+            "\"lastDefect\":null,"
+            "\"running\":%s"
+        "},"
+        "\"location\":\"Local Machine\""
+        "}",
+        timestamp,
+        port,
+        ctx ? ctx->current_fps : 0.0f,
+        get_temperature(),
+        get_cpu_usage(),
+        get_memory_usage(),
+        uptime_sec,
+        (ctx && ctx->model_handle) ? model_name : "None",
+        ctx ? (unsigned long long)ctx->total_detections : 0ULL,
+        uptime_sec > 0 && ctx ? (float)ctx->total_detections * 3600.0f / uptime_sec : 0.0f,
+        (ctx && ctx->camera_running) ? "true" : "false"
+    );
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
+ * Handle GET /api/nodes - return this runtime as a single node.
+ * This allows the dashboard to work in standalone mode without the coordinator.
+ */
+static int handle_nodes_list(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char response[2048];
+
+    /* Get hostname */
+    char hostname[256] = "localhost";
+#ifdef _WIN32
+    DWORD size = sizeof(hostname);
+    GetComputerNameA(hostname, &size);
+#else
+    gethostname(hostname, sizeof(hostname));
+#endif
+
+    /* Get the port from server state */
+    int port = 8080;
+    if (g_server) {
+        port = g_server->port;
+    }
+
+    /* Build node info */
+    snprintf(response, sizeof(response),
+        "{"
+        "\"nodes\":["
+            "{"
+                "\"id\":\"local\","
+                "\"name\":\"Local Runtime\","
+                "\"type\":\"edge\","
+                "\"host\":\"localhost\","
+                "\"status\":\"online\","
+                "\"runtime\":{\"port\":%d},"
+                "\"lastSeen\":\"%s\","
+                "\"metrics\":{"
+                    "\"fps\":%.1f,"
+                    "\"inferenceTime\":%.1f"
+                "},"
+                "\"inference\":{"
+                    "\"modelName\":\"%s\","
+                    "\"running\":%s"
+                "}"
+            "}"
+        "],"
+        "\"summary\":{\"total\":1,\"online\":1,\"offline\":0}"
+        "}",
+        port,
+        "now",
+        ctx ? ctx->current_fps : 0.0f,
+        0.0f,  /* inference time not tracked in ctx */
+        (ctx && ctx->model_handle) ? "loaded" : "none",
+        (ctx && ctx->camera_running) ? "true" : "false"
+    );
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
+ * Handle GET /api/files - browse directory on edge device.
+ * Query param: path (directory path to list)
+ */
+static int handle_files_list(struct MHD_Connection* conn, cira_ctx* ctx) {
+    (void)ctx;
+    char response[MAX_RESPONSE_SIZE];
+    char* p = response;
+    char* end = response + sizeof(response) - 256;
+
+    /* Get path parameter */
+    const char* path = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "path");
+    if (!path || path[0] == '\0') {
+#ifdef _WIN32
+        path = "C:\\";
+#else
+        path = "/home";
+#endif
+    }
+
+    /* Security: Prevent path traversal attacks */
+    if (strstr(path, "..") != NULL) {
+        const char* error = "{\"error\":\"Invalid path\"}";
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(error), (void*)error, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    /* Escape the path for JSON */
+    char escaped_path[1024];
+    const char* src = path;
+    char* dst = escaped_path;
+    char* dst_end = escaped_path + sizeof(escaped_path) - 2;
+    while (*src && dst < dst_end) {
+        if (*src == '\\') {
+            *dst++ = '\\';
+            *dst++ = '\\';
+        } else if (*src == '"') {
+            *dst++ = '\\';
+            *dst++ = '"';
+        } else {
+            *dst++ = *src;
+        }
+        src++;
+    }
+    *dst = '\0';
+
+    p += snprintf(p, end - p, "{\"path\":\"%s\",\"entries\":[", escaped_path);
+
+    int count = 0;
+    int file_count = 0;
+    int dir_count = 0;
+
+    DIR* d = opendir(path);
+    if (d) {
+        struct dirent* entry;
+        while ((entry = readdir(d)) != NULL && p < end - 256) {
+            /* Skip hidden files and . / .. */
+            if (entry->d_name[0] == '.') continue;
+
+            char full_path[2048];
+            snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+
+            struct stat st;
+            if (stat(full_path, &st) != 0) continue;
+
+            int is_dir = S_ISDIR(st.st_mode);
+            int is_image = 0;
+
+            /* Check if file is an image (for image tester) */
+            if (!is_dir) {
+                const char* name = entry->d_name;
+                size_t len = strlen(name);
+                if (len > 4) {
+                    const char* ext = name + len - 4;
+                    if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".png") == 0 ||
+                        strcasecmp(ext, ".bmp") == 0) {
+                        is_image = 1;
+                    }
+                    if (len > 5) {
+                        ext = name + len - 5;
+                        if (strcasecmp(ext, ".jpeg") == 0) {
+                            is_image = 1;
+                        }
+                    }
+                }
+            }
+
+            /* Escape filename for JSON */
+            char escaped_name[512];
+            const char* s = entry->d_name;
+            char* d_ptr = escaped_name;
+            char* d_end = escaped_name + sizeof(escaped_name) - 2;
+            while (*s && d_ptr < d_end) {
+                if (*s == '\\') {
+                    *d_ptr++ = '\\';
+                    *d_ptr++ = '\\';
+                } else if (*s == '"') {
+                    *d_ptr++ = '\\';
+                    *d_ptr++ = '"';
+                } else {
+                    *d_ptr++ = *s;
+                }
+                s++;
+            }
+            *d_ptr = '\0';
+
+            if (count > 0) p += snprintf(p, end - p, ",");
+            p += snprintf(p, end - p,
+                         "{\"name\":\"%s\",\"is_dir\":%s,\"is_image\":%s,\"size\":%ld}",
+                         escaped_name,
+                         is_dir ? "true" : "false",
+                         is_image ? "true" : "false",
+                         (long)st.st_size);
+            count++;
+
+            if (is_dir) dir_count++;
+            else file_count++;
+
+            /* Limit entries to prevent huge responses */
+            if (count >= 500) break;
+        }
+        closedir(d);
+    } else {
+        /* Directory not found or not accessible */
+        snprintf(response, sizeof(response),
+                "{\"error\":\"Cannot access directory\",\"path\":\"%s\"}", escaped_path);
+
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_NOT_FOUND, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    p += snprintf(p, end - p, "],\"count\":%d,\"dirs\":%d,\"files\":%d}",
+                 count, dir_count, file_count);
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
  * Handle /frame/info endpoint - return frame file info without the image data.
  */
 static int handle_frame_info(struct MHD_Connection* conn, cira_ctx* ctx) {
@@ -1093,6 +1487,200 @@ static int handle_frame_info(struct MHD_Connection* conn, cira_ctx* ctx) {
     MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
 
     int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/* Forward declarations for camera control */
+extern int camera_start(cira_ctx* ctx, int device_id);
+extern int camera_stop(cira_ctx* ctx);
+
+/**
+ * Handle POST /api/camera/start - start camera capture.
+ */
+static int handle_camera_start(struct MHD_Connection* conn, cira_ctx* ctx,
+                               const char* upload_data, size_t upload_size) {
+    char response[1024];
+
+    /* Parse device_id from POST data (simple JSON: {"device_id": 0}) */
+    int device_id = 0;
+
+    if (upload_data && upload_size > 0) {
+        const char* dev_key = strstr(upload_data, "\"device_id\"");
+        if (dev_key) {
+            dev_key = strchr(dev_key + 11, ':');
+            if (dev_key) {
+                device_id = atoi(dev_key + 1);
+            }
+        }
+    }
+
+    fprintf(stderr, "Starting camera %d...\n", device_id);
+
+    int result = camera_start(ctx, device_id);
+
+    if (result == CIRA_OK) {
+        snprintf(response, sizeof(response),
+                "{\"success\":true,\"device_id\":%d,\"message\":\"Camera started\"}",
+                device_id);
+    } else {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"Failed to start camera %d\"}", device_id);
+    }
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, result == CIRA_OK ? MHD_HTTP_OK : MHD_HTTP_BAD_REQUEST, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
+ * Handle POST /api/camera/stop - stop camera capture.
+ */
+static int handle_camera_stop(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char response[512];
+
+    fprintf(stderr, "Stopping camera...\n");
+
+    int result = camera_stop(ctx);
+
+    if (result == CIRA_OK) {
+        snprintf(response, sizeof(response),
+                "{\"success\":true,\"message\":\"Camera stopped\"}");
+    } else {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"Failed to stop camera\"}");
+    }
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
+ * Handle POST /api/inference/image - run inference on a single image.
+ * Accepts either:
+ * - {"path": "/path/to/image.jpg"} for device-local image
+ * - Multipart form data with image upload (future)
+ */
+static int handle_inference_image(struct MHD_Connection* conn, cira_ctx* ctx,
+                                  const char* upload_data, size_t upload_size) {
+    char response[MAX_RESPONSE_SIZE];
+
+    /* Check if model is loaded */
+    if (ctx->format == CIRA_FORMAT_UNKNOWN || ctx->model_handle == NULL) {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"No model loaded\"}");
+
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    /* Parse image path from POST data */
+    char image_path[512] = "";
+
+    if (upload_data && upload_size > 0) {
+        const char* path_key = strstr(upload_data, "\"path\"");
+        if (path_key) {
+            path_key = strchr(path_key + 6, '"');
+            if (path_key) {
+                path_key++;
+                const char* path_end = strchr(path_key, '"');
+                if (path_end) {
+                    size_t len = path_end - path_key;
+                    if (len >= sizeof(image_path)) len = sizeof(image_path) - 1;
+                    memcpy(image_path, path_key, len);
+                    image_path[len] = '\0';
+                }
+            }
+        }
+    }
+
+    if (image_path[0] == '\0') {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"Missing image path\"}");
+
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    /* Security: Prevent path traversal */
+    if (strstr(image_path, "..") != NULL) {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"Invalid path\"}");
+
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    /* Check if file exists */
+    struct stat st;
+    if (stat(image_path, &st) != 0) {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"Image file not found\"}");
+
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_NOT_FOUND, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    fprintf(stderr, "Running inference on image: %s\n", image_path);
+
+    /* Load and decode image using stb_image (include from jpeg_encoder.cpp) */
+    /* For now, we'll use OpenCV if available, or return an error */
+    /* TODO: Add direct image loading support */
+
+    /* Use cira_predict_image API - but we need to load the image first */
+    /* This requires OpenCV or stb_image integration */
+
+    /* For now, store the path and let the frontend know it needs to upload */
+    /* In a full implementation, we'd load the image here and run inference */
+
+    /* Placeholder response - indicates image inference is available but needs image data */
+    snprintf(response, sizeof(response),
+            "{\"success\":false,\"error\":\"Image loading not yet implemented. Use camera stream or upload via dashboard.\",\"path\":\"%s\"}",
+            image_path);
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_NOT_IMPLEMENTED, mhd_response);
     MHD_destroy_response(mhd_response);
 
     return ret;
@@ -1215,6 +1803,15 @@ static enum MHD_Result request_handler(
         int ret = MHD_NO;
         if (strcmp(url, "/api/model") == 0) {
             ret = handle_model_load(conn, ctx, pctx->data, pctx->size);
+        } else if (strncmp(url, "/api/nodes/", 11) == 0 && strstr(url, "/model") != NULL) {
+            /* Handle /api/nodes/:id/model - same as /api/model for standalone mode */
+            ret = handle_model_load(conn, ctx, pctx->data, pctx->size);
+        } else if (strcmp(url, "/api/camera/start") == 0) {
+            ret = handle_camera_start(conn, ctx, pctx->data, pctx->size);
+        } else if (strcmp(url, "/api/camera/stop") == 0) {
+            ret = handle_camera_stop(conn, ctx);
+        } else if (strcmp(url, "/api/inference/image") == 0) {
+            ret = handle_inference_image(conn, ctx, pctx->data, pctx->size);
         } else {
             ret = handle_not_found(conn);
         }
@@ -1247,6 +1844,99 @@ static enum MHD_Result request_handler(
     }
     if (strcmp(url, "/api/models") == 0) {
         return handle_models_list(conn, ctx);
+    }
+    if (strcmp(url, "/api/nodes") == 0) {
+        return handle_nodes_list(conn, ctx);
+    }
+    /* Handle /api/nodes/:id/models - return available models for node */
+    if (strncmp(url, "/api/nodes/", 11) == 0 && strstr(url, "/models") != NULL) {
+        /* For standalone mode, return models in format expected by DeviceDetail.vue */
+        /* DeviceDetail expects { available: [...] } format */
+        char response[MAX_RESPONSE_SIZE];
+        char* p = response;
+        char* end = response + sizeof(response) - 256;
+
+        p += snprintf(p, end - p, "{\"available\":[");
+
+        int count = 0;
+
+        /* Scan models directory if set */
+        if (g_models_dir[0] != '\0') {
+            DIR* d = opendir(g_models_dir);
+            if (d) {
+                struct dirent* entry;
+                while ((entry = readdir(d)) != NULL && p < end - 256) {
+                    if (entry->d_name[0] == '.') continue;
+
+                    char full_path[2048];
+                    snprintf(full_path, sizeof(full_path), "%s/%s", g_models_dir, entry->d_name);
+
+                    struct stat st;
+                    if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                        /* Check for model files inside */
+                        int has_onnx = 0, has_ncnn = 0;
+                        DIR* model_d = opendir(full_path);
+                        if (model_d) {
+                            struct dirent* model_entry;
+                            while ((model_entry = readdir(model_d)) != NULL) {
+                                const char* name = model_entry->d_name;
+                                size_t len = strlen(name);
+                                if (len > 5 && strcmp(name + len - 5, ".onnx") == 0) has_onnx = 1;
+                                if (len > 6 && strcmp(name + len - 6, ".param") == 0) has_ncnn = 1;
+                            }
+                            closedir(model_d);
+                        }
+
+                        if (has_onnx || has_ncnn) {
+                            int is_loaded = (ctx && ctx->model_path[0] != '\0' &&
+                                           strstr(ctx->model_path, entry->d_name) != NULL);
+                            if (count > 0) p += snprintf(p, end - p, ",");
+                            p += snprintf(p, end - p, "{\"name\":\"%s\",\"path\":\"%s\",\"type\":\"%s\",\"loaded\":%s}",
+                                         entry->d_name, full_path, has_onnx ? "onnx" : "ncnn",
+                                         is_loaded ? "true" : "false");
+                            count++;
+                        }
+                    }
+                }
+                closedir(d);
+            }
+        }
+
+        /* Add currently loaded model if not already in list */
+        if (ctx && ctx->model_path[0] != '\0' && count == 0) {
+            const char* type = "unknown";
+            if (ctx->format == CIRA_FORMAT_ONNX) type = "onnx";
+            else if (ctx->format == CIRA_FORMAT_NCNN) type = "ncnn";
+
+            if (count > 0) p += snprintf(p, end - p, ",");
+            p += snprintf(p, end - p, "{\"name\":\"Current Model\",\"path\":\"%s\",\"type\":\"%s\",\"loaded\":true}",
+                         ctx->model_path, type);
+            count++;
+        }
+
+        p += snprintf(p, end - p, "]}");
+
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+    /* Handle /api/nodes/:id for individual node details */
+    if (strncmp(url, "/api/nodes/", 11) == 0 && strlen(url) > 11) {
+        const char* node_id = url + 11;
+        /* Skip if it contains another slash (like /models) - already handled above */
+        if (strchr(node_id, '/') == NULL) {
+            return handle_node_detail(conn, ctx, node_id);
+        }
+    }
+    if (strcmp(url, "/api/cameras") == 0) {
+        return handle_cameras_list(conn, ctx);
+    }
+    if (strcmp(url, "/api/files") == 0) {
+        return handle_files_list(conn, ctx);
     }
     if (strcmp(url, "/snapshot") == 0) {
         return handle_snapshot(conn, ctx);

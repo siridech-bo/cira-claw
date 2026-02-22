@@ -248,6 +248,7 @@ extern "C" int camera_start(cira_ctx* ctx, int device_id) {
 
     /* Start capture thread */
     ctx->camera_running = 1;
+    ctx->current_camera = device_id;
 
     int ret = pthread_create(&ctx->camera_thread, NULL, camera_thread_func_impl, ctx);
     if (ret != 0) {
@@ -278,6 +279,7 @@ extern "C" int camera_stop(cira_ctx* ctx) {
 
     /* Signal thread to stop */
     ctx->camera_running = 0;
+    ctx->current_camera = -1;
 
     /* Wait for thread to finish */
     pthread_join(ctx->camera_thread, NULL);

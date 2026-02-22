@@ -426,6 +426,7 @@ cira_ctx* cira_create(void) {
     pthread_mutex_init(&ctx->model_mutex, NULL);
     pthread_mutex_init(&ctx->frame_file_mutex, NULL);
     ctx->model_swapping = 0;
+    ctx->current_camera = -1;  /* No camera active initially */
     ctx->frame_sequence = 0;
     ctx->frame_file_path[0] = '\0';
 

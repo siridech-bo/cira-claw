@@ -25,8 +25,10 @@ const imgSrc = ref('');
 const loading = ref(true);
 const errorCount = ref(0);
 const lastSequence = ref(0);
+const streamError = ref(false);
 
 let pollTimer: number | null = null;
+let connectionTimeout: number | null = null;
 
 const baseUrl = computed(() => `http://${props.host}:${props.port}`);
 
@@ -39,18 +41,41 @@ const frameUrl = computed(() => {
   return `${baseUrl.value}/frame/latest`;
 });
 
+// Clear connection timeout
+function clearConnectionTimeout() {
+  if (connectionTimeout) {
+    clearTimeout(connectionTimeout);
+    connectionTimeout = null;
+  }
+}
+
 // Start with MJPEG, fallback to polling on errors
 function startMjpeg() {
   activeMode.value = 'mjpeg';
   loading.value = true;
+  errorCount.value = 0;
+  streamError.value = false;
+  clearConnectionTimeout();
   imgSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
   emit('modeChange', 'mjpeg');
+
+  // Set connection timeout - if MJPEG doesn't load within 5 seconds, switch to polling
+  if (props.mode === 'auto') {
+    connectionTimeout = window.setTimeout(() => {
+      if (loading.value && activeMode.value === 'mjpeg') {
+        console.log('MJPEG connection timeout, switching to polling mode');
+        startPolling();
+      }
+    }, 5000);
+  }
 }
 
 // Switch to polling mode
 function startPolling() {
   activeMode.value = 'polling';
   loading.value = true;
+  streamError.value = false;
+  clearConnectionTimeout();
   emit('modeChange', 'polling');
   pollFrame();
 }
@@ -106,8 +131,9 @@ async function pollFrame() {
       // Retry after a longer delay
       pollTimer = window.setTimeout(pollFrame, 1000);
     } else {
-      // Max retries reached - stop loading state and emit error
+      // Max retries reached - show error state with reconnect option
       loading.value = false;
+      streamError.value = true;
       emit('error', 'Failed to fetch frames');
     }
   }
@@ -115,6 +141,7 @@ async function pollFrame() {
 
 // Handle MJPEG load success
 function onMjpegLoad() {
+  clearConnectionTimeout();
   loading.value = false;
   errorCount.value = 0;
 }
@@ -137,6 +164,7 @@ function onMjpegError() {
 
 // Cleanup
 function stopPolling() {
+  clearConnectionTimeout();
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
@@ -147,6 +175,29 @@ function stopPolling() {
   }
 }
 
+// Reconnect function for manual retry
+function reconnect() {
+  stopPolling();
+  errorCount.value = 0;
+  streamError.value = false;
+  if (props.mode === 'polling') {
+    startPolling();
+  } else {
+    startMjpeg();
+  }
+}
+
+// Handle visibility change - auto-reconnect when tab becomes visible
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    // If we had an error or stream stopped, try to reconnect
+    if (streamError.value || (loading.value && !pollTimer && !connectionTimeout)) {
+      console.log('Tab visible, attempting reconnection');
+      reconnect();
+    }
+  }
+}
+
 // Initialize based on mode
 onMounted(() => {
   if (props.mode === 'polling') {
@@ -154,6 +205,8 @@ onMounted(() => {
   } else {
     startMjpeg();
   }
+  // Listen for visibility changes
+  document.addEventListener('visibilitychange', handleVisibilityChange);
 });
 
 // Watch for mode prop changes
@@ -169,18 +222,15 @@ watch(() => props.mode, (newMode) => {
 // Cleanup on unmount
 onUnmounted(() => {
   stopPolling();
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 
 // Expose method to force refresh
 defineExpose({
   refresh() {
-    errorCount.value = 0;
-    if (activeMode.value === 'polling') {
-      pollFrame();
-    } else {
-      startMjpeg();
-    }
+    reconnect();
   },
+  reconnect,
   switchMode(mode: 'mjpeg' | 'polling') {
     stopPolling();
     if (mode === 'polling') {
@@ -194,19 +244,24 @@ defineExpose({
 
 <template>
   <div class="camera-stream">
-    <div class="loading-overlay" v-if="loading">
+    <div class="loading-overlay" v-if="loading && !streamError">
       <span class="spinner"></span>
       <span>Connecting...</span>
     </div>
+    <div class="error-overlay" v-if="streamError">
+      <span class="error-icon">⚠️</span>
+      <span>Stream disconnected</span>
+      <button class="reconnect-btn" @click="reconnect">Reconnect</button>
+    </div>
     <img
-      v-if="imgSrc"
+      v-if="imgSrc && !streamError"
       :src="imgSrc"
       alt="Camera feed"
       class="stream-img"
       @load="onMjpegLoad"
       @error="onMjpegError"
     />
-    <div class="mode-indicator" :class="activeMode">
+    <div class="mode-indicator" :class="activeMode" v-if="!streamError">
       {{ activeMode === 'mjpeg' ? 'MJPEG' : 'Polling' }}
     </div>
   </div>
@@ -272,5 +327,38 @@ defineExpose({
 
 .mode-indicator.polling {
   color: #fbbf24;
+}
+
+.error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 41, 59, 0.95);
+  color: #f87171;
+  gap: 12px;
+  z-index: 10;
+}
+
+.error-icon {
+  font-size: 32px;
+}
+
+.reconnect-btn {
+  margin-top: 8px;
+  padding: 8px 20px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.reconnect-btn:hover {
+  background: #2563eb;
 }
 </style>

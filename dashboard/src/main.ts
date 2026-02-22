@@ -6,6 +6,8 @@ import DeviceDetail from './pages/DeviceDetail.vue';
 import CameraGrid from './pages/CameraGrid.vue';
 import Chat from './pages/Chat.vue';
 import ModelConversion from './pages/ModelConversion.vue';
+import CameraManager from './pages/CameraManager.vue';
+import ImageTester from './pages/ImageTester.vue';
 
 const routes = [
   { path: '/', component: Overview },
@@ -14,6 +16,8 @@ const routes = [
   { path: '/chat', component: Chat },
   // Utility routes
   { path: '/utility/model-conversion', component: ModelConversion },
+  { path: '/utility/camera-manager', component: CameraManager },
+  { path: '/utility/image-tester', component: ImageTester },
 ];
 
 const router = createRouter({

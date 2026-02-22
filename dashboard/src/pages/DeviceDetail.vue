@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import CameraStream from '../components/CameraStream.vue';
 
@@ -58,14 +58,31 @@ interface ModelInfo {
 
 const availableModels = ref<ModelInfo[]>([]);
 const selectedModelPath = ref('');
+const manualModelPath = ref('');
 const modelSwitching = ref(false);
 const modelError = ref<string | null>(null);
 const modelSuccess = ref<string | null>(null);
 const streamMode = ref<'auto' | 'mjpeg' | 'polling'>('auto');
 
+let refreshTimer: number | null = null;
+
 onMounted(async () => {
   await fetchNode();
   await fetchModels();
+
+  // Start periodic refresh every 3 seconds
+  refreshTimer = window.setInterval(async () => {
+    if (!loading.value && !modelSwitching.value) {
+      await fetchNodeSilent();
+    }
+  }, 3000);
+});
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
 });
 
 async function fetchNode() {
@@ -87,6 +104,18 @@ async function fetchNode() {
     error.value = e instanceof Error ? e.message : 'Failed to fetch device';
   } finally {
     loading.value = false;
+  }
+}
+
+// Silent refresh without loading indicator
+async function fetchNodeSilent() {
+  try {
+    const response = await fetch(`/api/nodes/${nodeId.value}`);
+    if (response.ok) {
+      node.value = await response.json();
+    }
+  } catch (e) {
+    // Silent failure - don't show error on background refresh
   }
 }
 
@@ -122,8 +151,9 @@ async function fetchModels() {
 }
 
 async function switchModel() {
-  if (!selectedModelPath.value) {
-    modelError.value = 'Please select a model';
+  const modelPath = manualModelPath.value.trim() || selectedModelPath.value;
+  if (!modelPath) {
+    modelError.value = 'Please select a model or enter a path';
     return;
   }
 
@@ -135,7 +165,7 @@ async function switchModel() {
     const response = await fetch(`/api/nodes/${nodeId.value}/model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: selectedModelPath.value }),
+      body: JSON.stringify({ path: modelPath }),
     });
 
     const data = await response.json();
@@ -146,6 +176,7 @@ async function switchModel() {
 
     modelSuccess.value = `Model loaded: ${data.format || 'success'}`;
     selectedModelPath.value = '';
+    manualModelPath.value = '';
 
     // Refresh node data to update model name
     await fetchNode();
@@ -301,12 +332,22 @@ function formatUptime(seconds: number | null | undefined): string {
               </option>
             </select>
 
+            <div class="manual-path">
+              <input
+                v-model="manualModelPath"
+                type="text"
+                placeholder="Or enter model path (e.g., D:/models/yolov4)"
+                :disabled="modelSwitching || node.status !== 'online'"
+                @keyup.enter="switchModel"
+              />
+            </div>
+
             <button
               class="switch-btn"
               @click="switchModel"
-              :disabled="modelSwitching || !selectedModelPath || node.status !== 'online'"
+              :disabled="modelSwitching || (!selectedModelPath && !manualModelPath.trim()) || node.status !== 'online'"
             >
-              {{ modelSwitching ? 'Loading...' : 'Switch Model' }}
+              {{ modelSwitching ? 'Loading...' : 'Load Model' }}
             </button>
           </div>
 
@@ -613,6 +654,30 @@ function formatUptime(seconds: number | null | undefined): string {
 }
 
 .model-selector select:disabled {
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+
+.manual-path {
+  width: 100%;
+}
+
+.manual-path input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: white;
+}
+
+.manual-path input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.manual-path input:disabled {
   background: #f1f5f9;
   cursor: not-allowed;
 }
