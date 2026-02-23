@@ -95,11 +95,28 @@ int jpeg_encode_annotated(cira_ctx* ctx, const uint8_t* rgb_data, int width, int
     cv::Mat bgr;
     cv::cvtColor(rgb, bgr, cv::COLOR_RGB2BGR);
 
-    /* Draw detections */
+    /* Draw detections with persistence (reduce flickering) */
     pthread_mutex_lock(&ctx->result_mutex);
 
-    for (int i = 0; i < ctx->num_detections; i++) {
-        cira_detection_t* det = &ctx->detections[i];
+    /* Use current detections, or fall back to previous if current is empty */
+    cira_detection_t* dets = ctx->detections;
+    int num_dets = ctx->num_detections;
+
+    if (num_dets > 0) {
+        /* Save current detections for persistence */
+        memcpy(ctx->prev_detections, ctx->detections,
+               ctx->num_detections * sizeof(cira_detection_t));
+        ctx->prev_num_detections = ctx->num_detections;
+        ctx->prev_detection_frame = ctx->frame_sequence;
+    } else if (ctx->prev_num_detections > 0 &&
+               (ctx->frame_sequence - ctx->prev_detection_frame) <= 3) {
+        /* Use previous detections if within 3 frames */
+        dets = ctx->prev_detections;
+        num_dets = ctx->prev_num_detections;
+    }
+
+    for (int i = 0; i < num_dets; i++) {
+        cira_detection_t* det = &dets[i];
 
         /* Convert normalized coords to pixel coords */
         int x = (int)(det->x * width);
@@ -107,11 +124,11 @@ int jpeg_encode_annotated(cira_ctx* ctx, const uint8_t* rgb_data, int width, int
         int w = (int)(det->w * width);
         int h = (int)(det->h * height);
 
-        /* Draw bounding box (green) */
+        /* Draw bounding box (green, thicker line) */
         cv::rectangle(bgr,
                       cv::Point(x, y),
                       cv::Point(x + w, y + h),
-                      cv::Scalar(0, 255, 0), 2);
+                      cv::Scalar(0, 255, 0), 3);
 
         /* Draw label background */
         const char* label = cira_get_label(ctx, det->label_id);
@@ -119,18 +136,18 @@ int jpeg_encode_annotated(cira_ctx* ctx, const uint8_t* rgb_data, int width, int
         snprintf(text, sizeof(text), "%s %.0f%%", label, det->confidence * 100);
 
         int baseline;
-        cv::Size text_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
+        cv::Size text_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.7, 2, &baseline);
 
         cv::rectangle(bgr,
-                      cv::Point(x, y - text_size.height - 4),
-                      cv::Point(x + text_size.width + 4, y),
+                      cv::Point(x, y - text_size.height - 8),
+                      cv::Point(x + text_size.width + 8, y),
                       cv::Scalar(0, 255, 0), cv::FILLED);
 
-        /* Draw label text (black on green) */
+        /* Draw label text (black on green, bigger font) */
         cv::putText(bgr, text,
-                    cv::Point(x + 2, y - 2),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                    cv::Scalar(0, 0, 0), 1);
+                    cv::Point(x + 4, y - 4),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                    cv::Scalar(0, 0, 0), 2);
     }
 
     pthread_mutex_unlock(&ctx->result_mutex);

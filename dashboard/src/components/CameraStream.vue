@@ -26,9 +26,13 @@ const loading = ref(true);
 const errorCount = ref(0);
 const lastSequence = ref(0);
 const streamError = ref(false);
+const lastFrameTime = ref(0);
 
 let pollTimer: number | null = null;
 let connectionTimeout: number | null = null;
+let mjpegWatchdog: number | null = null;
+
+const MJPEG_STALL_TIMEOUT = 8000; // Consider stream stalled if no frame for 8 seconds
 
 const baseUrl = computed(() => `http://${props.host}:${props.port}`);
 
@@ -49,6 +53,39 @@ function clearConnectionTimeout() {
   }
 }
 
+// Clear MJPEG watchdog
+function clearMjpegWatchdog() {
+  if (mjpegWatchdog) {
+    clearInterval(mjpegWatchdog);
+    mjpegWatchdog = null;
+  }
+}
+
+// Start MJPEG watchdog to detect stalled streams
+function startMjpegWatchdog() {
+  clearMjpegWatchdog();
+  lastFrameTime.value = Date.now();
+
+  mjpegWatchdog = window.setInterval(() => {
+    if (activeMode.value !== 'mjpeg' || loading.value) return;
+
+    const timeSinceLastFrame = Date.now() - lastFrameTime.value;
+    if (timeSinceLastFrame > MJPEG_STALL_TIMEOUT) {
+      console.log(`MJPEG stream stalled (${timeSinceLastFrame}ms since last frame), reconnecting...`);
+      // Try to reconnect by refreshing the stream URL
+      imgSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+      lastFrameTime.value = Date.now(); // Reset to avoid rapid retries
+      errorCount.value++;
+
+      // After multiple stalls, switch to polling if in auto mode
+      if (props.mode === 'auto' && errorCount.value >= 3) {
+        console.log('MJPEG keeps stalling, switching to polling mode');
+        startPolling();
+      }
+    }
+  }, 2000); // Check every 2 seconds
+}
+
 // Start with MJPEG, fallback to polling on errors
 function startMjpeg() {
   activeMode.value = 'mjpeg';
@@ -56,8 +93,12 @@ function startMjpeg() {
   errorCount.value = 0;
   streamError.value = false;
   clearConnectionTimeout();
+  clearMjpegWatchdog();
   imgSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
   emit('modeChange', 'mjpeg');
+
+  // Start watchdog to detect stalled streams
+  startMjpegWatchdog();
 
   // Set connection timeout - if MJPEG doesn't load within 5 seconds, switch to polling
   if (props.mode === 'auto') {
@@ -76,6 +117,7 @@ function startPolling() {
   loading.value = true;
   streamError.value = false;
   clearConnectionTimeout();
+  clearMjpegWatchdog();
   emit('modeChange', 'polling');
   pollFrame();
 }
@@ -144,6 +186,7 @@ function onMjpegLoad() {
   clearConnectionTimeout();
   loading.value = false;
   errorCount.value = 0;
+  lastFrameTime.value = Date.now(); // Reset watchdog timer on each frame
 }
 
 // Handle MJPEG error - switch to polling mode
@@ -165,6 +208,7 @@ function onMjpegError() {
 // Cleanup
 function stopPolling() {
   clearConnectionTimeout();
+  clearMjpegWatchdog();
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;

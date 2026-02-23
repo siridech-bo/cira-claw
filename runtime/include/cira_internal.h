@@ -81,6 +81,11 @@ struct cira_ctx {
     int num_detections;
     char result_json[CIRA_MAX_JSON_LEN];
 
+    /* Detection persistence (for smooth annotations) */
+    cira_detection_t prev_detections[CIRA_MAX_DETECTIONS];
+    int prev_num_detections;
+    uint64_t prev_detection_frame;  /* Frame number when prev_detections was set */
+
     /* Streaming state */
     int camera_running;
     int current_camera;     /* Currently active camera device ID (-1 if none) */

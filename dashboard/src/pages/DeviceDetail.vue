@@ -467,7 +467,7 @@ function formatUptime(seconds: number | null | undefined): string {
   align-items: center;
   gap: 8px;
   font-size: 0.875rem;
-  color: #64748b;
+  color: #94A3B8;
   padding: 12px 16px;
   background: #1E293B;
   border-radius: 8px;
@@ -479,6 +479,7 @@ function formatUptime(seconds: number | null | undefined): string {
   border: 1px solid #334155;
   border-radius: 6px;
   background: #1E293B;
+  color: #E2E8F0;
   font-size: 0.875rem;
   cursor: pointer;
 }
@@ -534,7 +535,7 @@ function formatUptime(seconds: number | null | undefined): string {
 .info-card h3 {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #64748b;
+  color: #94A3B8;
   margin-bottom: 16px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -581,7 +582,11 @@ function formatUptime(seconds: number | null | undefined): string {
 }
 
 .info-row .label {
-  color: #64748b;
+  color: #94A3B8;
+}
+
+.info-row span:not(.label):not(.warning) {
+  color: #E2E8F0;
 }
 
 .info-row .warning {
@@ -645,6 +650,7 @@ function formatUptime(seconds: number | null | undefined): string {
   border-radius: 6px;
   font-size: 0.875rem;
   background: #1E293B;
+  color: #E2E8F0;
   cursor: pointer;
 }
 
@@ -670,6 +676,7 @@ function formatUptime(seconds: number | null | undefined): string {
   border-radius: 6px;
   font-size: 0.875rem;
   background: #1E293B;
+  color: #E2E8F0;
 }
 
 .manual-path input:focus {
@@ -681,6 +688,10 @@ function formatUptime(seconds: number | null | undefined): string {
 .manual-path input:disabled {
   background: #334155;
   cursor: not-allowed;
+}
+
+.manual-path input::placeholder {
+  color: #64748b;
 }
 
 .switch-btn {

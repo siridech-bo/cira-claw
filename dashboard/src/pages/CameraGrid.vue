@@ -173,7 +173,7 @@ function handleStreamError(nodeId: string, msg: string) {
   align-items: center;
   gap: 8px;
   font-size: 0.875rem;
-  color: #64748b;
+  color: #94A3B8;
 }
 
 .mode-selector select {
@@ -181,6 +181,7 @@ function handleStreamError(nodeId: string, msg: string) {
   border: 1px solid #334155;
   border-radius: 6px;
   background: #1E293B;
+  color: #E2E8F0;
   font-size: 0.875rem;
   cursor: pointer;
 }
@@ -205,7 +206,12 @@ function handleStreamError(nodeId: string, msg: string) {
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.875rem;
-  color: #94A3B8;
+  color: #E2E8F0;
+  transition: background 0.2s;
+}
+
+.grid-controls button:hover:not(.active) {
+  background: #334155;
 }
 
 .grid-controls button.active {

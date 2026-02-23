@@ -237,7 +237,7 @@ h1 {
   font-weight: 600;
   margin-top: 16px;
   margin-bottom: 8px;
-  color: #334155;
+  color: #94A3B8;
 }
 
 .form-group {
@@ -248,7 +248,7 @@ h1 {
   display: block;
   font-weight: 500;
   margin-bottom: 6px;
-  color: #334155;
+  color: #E2E8F0;
 }
 
 .form-group input,
@@ -258,6 +258,12 @@ h1 {
   border: 1px solid #334155;
   border-radius: 6px;
   font-size: 0.9rem;
+  background: #0F172A;
+  color: #E2E8F0;
+}
+
+.form-group input::placeholder {
+  color: #64748b;
 }
 
 .form-group input:focus,
@@ -338,6 +344,10 @@ h1 {
   gap: 8px;
 }
 
+.status-text {
+  color: #1E293B;
+}
+
 .status-icon {
   font-size: 1.25rem;
 }
@@ -377,6 +387,16 @@ h1 {
   background: #0F172A;
 }
 
+.info-section h3 {
+  color: #E2E8F0;
+}
+
+.info-section p {
+  color: #94A3B8;
+  font-size: 0.875rem;
+  margin-bottom: 8px;
+}
+
 .info-section ul {
   margin: 0;
   padding-left: 20px;
@@ -384,12 +404,17 @@ h1 {
 
 .info-section li {
   margin-bottom: 8px;
-  color: #475569;
+  color: #94A3B8;
   font-size: 0.875rem;
+}
+
+.info-section li strong {
+  color: #E2E8F0;
 }
 
 .info-section code {
   background: #334155;
+  color: #10B981;
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.8rem;
