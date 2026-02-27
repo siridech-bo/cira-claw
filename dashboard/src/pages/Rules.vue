@@ -12,7 +12,8 @@ interface SavedRule {
   enabled: boolean;
   created_at: string;
   created_by: string;
-  node_id: string;
+  node_id?: string;
+  prompt?: string;
   tags?: string[];
   signal_type?: string;                    // Deprecated
 }
