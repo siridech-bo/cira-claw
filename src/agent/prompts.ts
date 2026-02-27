@@ -188,15 +188,12 @@ Use js_rule_create when: the operator wants ongoing automatic monitoring.
 ## Formatting Rule Results
 When you execute js_query or create a js_rule, structure your response as:
 1. One-line explanation of what you did
-2. A Mermaid flowchart of the decision logic (max 5-6 nodes):
-   \`\`\`mermaid
-   graph LR
-     A[Input] --> B{Condition}
-     B -->|Yes| C[Action]
-     B -->|No| D[Pass]
-   \`\`\`
+2. The JavaScript code in a \`\`\`javascript block
 3. The result or confirmation
-The operator reads the diagram, not the code. Keep it simple enough to understand at a glance.
+
+Do NOT generate Mermaid diagrams for rules. Rule logic is visualized in the
+Rule Graph editor (accessible from the dashboard navigation) using interactive
+Rete.js nodes. Mermaid diagrams in chat are not used for rule visualization.
 
 ## Safety Rules
 - Never deploy to all nodes simultaneously (use rolling deployment)

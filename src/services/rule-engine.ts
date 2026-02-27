@@ -84,18 +84,6 @@ export interface RuleResult {
 }
 
 // ─── Saved Rule ───────────────────────────────────────────────────────────────
-// This is the format stored in ~/.cira/rules/*.js and the in-memory representation.
-//
-// v3 additions:
-// - 'socket_type' classifies the signal domain (required in v3)
-// - 'reads' lists payload fields the rule accesses
-// - 'produces' lists action types the rule can return
-//
-// Legacy fields (kept for backward compatibility):
-// - 'tags' for operational metadata
-// - 'signal_type' is deprecated, use socket_type instead
-//
-// 'node_id' scopes the rule to a specific edge device.
 
 export interface SavedRule {
   id: string;                              // Filename without .js extension
@@ -104,14 +92,19 @@ export interface SavedRule {
   socket_type: SocketType;                 // v3: Signal category (required)
   reads: string[];                         // v3: Payload fields accessed
   produces: RuleAction['action'][];        // v3: Action types returned
-  code: string;                            // The JS code (AI-generated)
+  code: string;                            // The JS code
   enabled: boolean;
   created_at: string;                      // ISO timestamp
   created_by: string;                      // 'ai-agent' | 'manual'
-  node_id?: string;                        // Which node this rule applies to
+  node_id?: string;                        // Scope to specific node. Omit = applies to all nodes.
+                                           // Reserved for multi-node deployment (future spec).
   prompt?: string;                         // Original prompt that created the rule
-  tags?: string[];                         // e.g. ['reject-logic', 'defect-rate', 'pcb']
-  signal_type?: string;                    // Deprecated: use socket_type instead
+  tags?: string[];                         // Operator-assigned labels e.g. ['reject-logic', 'pcb']
+                                           // Used by js_rule_list filter_tag. No semantic meaning.
+  signal_type?: string;                    // DEPRECATED. Replaced by socket_type in v3.
+                                           // Kept only for loading pre-v3 rule files.
+                                           // Do not write this field. Do not read this field.
+                                           // Will be removed when all pre-v3 rules are migrated.
 }
 
 // Maximum active rules
@@ -489,59 +482,6 @@ export class RuleEngine {
     }
 
     return results;
-  }
-
-  /**
-   * Evaluate all enabled rules against the provided payload.
-   * Returns array of actions for the caller to dispatch.
-   * If any rule throws or times out, logs error and continues.
-   *
-   * @deprecated Use evaluateAll() for v3 API with socket metadata.
-   */
-  async evaluateAllRules(payload: RulePayload): Promise<RuleAction[]> {
-    const startTime = performance.now();
-    const actions: RuleAction[] = [];
-
-    // Load enabled rules, sorted by creation date (oldest first)
-    let rules = this.loadRules()
-      .filter(r => r.enabled)
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-    // Limit to MAX_ACTIVE_RULES
-    if (rules.length > MAX_ACTIVE_RULES) {
-      logger.warn(`Too many active rules (${rules.length}), limiting to ${MAX_ACTIVE_RULES} oldest`);
-      rules = rules.slice(0, MAX_ACTIVE_RULES);
-    }
-
-    for (const rule of rules) {
-      try {
-        // Check if we're approaching the total cycle limit
-        const elapsed = performance.now() - startTime;
-        if (elapsed > TOTAL_RULE_CYCLE_MS) {
-          logger.warn(`Rule cycle time exceeded ${TOTAL_RULE_CYCLE_MS}ms, stopping evaluation`);
-          break;
-        }
-
-        const result = await this.evaluateRule(rule, payload);
-
-        if (result.success && result.action) {
-          actions.push(result.action);
-        } else if (!result.success) {
-          logger.warn(`Rule ${rule.id} failed: ${result.error}`);
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error(`Unexpected error evaluating rule ${rule.id}: ${errorMessage}`);
-        // Continue to next rule
-      }
-    }
-
-    const totalMs = performance.now() - startTime;
-    if (rules.length > 0) {
-      logger.debug(`Evaluated ${rules.length} rules in ${totalMs.toFixed(1)}ms`);
-    }
-
-    return actions;
   }
 
   /**

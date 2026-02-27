@@ -1,15 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue';
-
-// Declare mermaid on window for TypeScript
-declare global {
-  interface Window {
-    mermaid?: {
-      initialize: (config: Record<string, unknown>) => void;
-      run: (config: { querySelector: string }) => Promise<void>;
-    };
-  }
-}
+import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 
 interface Message {
   id: string;
@@ -195,24 +185,15 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 /**
- * Render message content with Mermaid diagrams and code blocks.
- *
- * Security: We escape HTML to prevent XSS, then restore our own formatted tags.
- * Mermaid regex MUST run before generic code block regex.
+ * Render message content: escape HTML, then render code blocks with styling.
+ * Rule visualization is handled by the Rete.js Rule Graph editor (Spec G),
+ * not inline chat diagrams.
  */
 function renderContent(content: string): string {
-  // Step 1: Extract code blocks and mermaid blocks before escaping
+  // Step 1: Extract code blocks before HTML escaping
   const codeBlocks: string[] = [];
-  const mermaidBlocks: string[] = [];
 
-  // Store mermaid blocks (process first to handle them separately)
-  let html = content.replace(/```mermaid\n([\s\S]*?)```/g, (_, code) => {
-    mermaidBlocks.push(code);
-    return `__MERMAID_${mermaidBlocks.length - 1}__`;
-  });
-
-  // Store code blocks
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+  let html = content.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
     codeBlocks.push(code);
     return `__CODE_${codeBlocks.length - 1}__`;
   });
@@ -223,13 +204,7 @@ function renderContent(content: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // Step 3: Restore mermaid blocks with proper styling
-  html = html.replace(/__MERMAID_(\d+)__/g, (_, idx) => {
-    const code = mermaidBlocks[parseInt(idx)];
-    return `<div class="mermaid" style="margin:12px 0;background:#1e293b;padding:16px;border-radius:8px;overflow-x:auto">${code}</div>`;
-  });
-
-  // Step 4: Restore code blocks with proper styling
+  // Step 3: Restore code blocks with styling
   html = html.replace(/__CODE_(\d+)__/g, (_, idx) => {
     const code = codeBlocks[parseInt(idx)]
       .replace(/&/g, '&amp;')
@@ -240,27 +215,6 @@ function renderContent(content: string): string {
 
   return html;
 }
-
-/**
- * Trigger Mermaid rendering after DOM update.
- */
-async function renderMermaid() {
-  await nextTick();
-  window.mermaid?.run({ querySelector: '.mermaid' });
-}
-
-// Watch for new assistant messages and render Mermaid diagrams
-watch(
-  () => messages.value.length,
-  (newLen, oldLen) => {
-    if (newLen > oldLen) {
-      const lastMessage = messages.value[newLen - 1];
-      if (lastMessage?.role === 'assistant') {
-        renderMermaid();
-      }
-    }
-  }
-);
 </script>
 
 <template>
