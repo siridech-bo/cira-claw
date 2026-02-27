@@ -1,27 +1,34 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
-
-// Declare mermaid on window for TypeScript
-declare global {
-  interface Window {
-    mermaid?: {
-      initialize: (config: Record<string, unknown>) => void;
-      run: (config: { querySelector: string }) => Promise<void>;
-    };
-  }
-}
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 
 interface SavedRule {
   id: string;
   name: string;
   description: string;
+  socket_type: string;                     // v3: Signal category
+  reads: string[];                         // v3: Payload fields accessed
+  produces: string[];                      // v3: Action types returned
   code: string;
   enabled: boolean;
   created_at: string;
   created_by: string;
   node_id: string;
   tags?: string[];
-  signal_type?: string;
+  signal_type?: string;                    // Deprecated
+}
+
+// Socket type colors for visual distinction
+const SOCKET_COLORS: Record<string, string> = {
+  'vision.confidence':  '#F59E0B',
+  'vision.detection':   '#10B981',
+  'signal.rate':        '#8B5CF6',
+  'signal.threshold':   '#3B82F6',
+  'system.health':      '#EF4444',
+  'any.boolean':        '#6B7280',
+};
+
+function socketTypeColor(socketType: string): string {
+  return SOCKET_COLORS[socketType] ?? '#6B7280';
 }
 
 interface ChatResponse {
@@ -45,9 +52,6 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const selectedRule = ref<SavedRule | null>(null);
 const saving = ref(false);
-
-// Mermaid re-render key - increment to force re-render
-const mermaidKey = ref(0);
 
 // Quick Edit state
 const quickEditOpen = ref(false);
@@ -232,10 +236,6 @@ async function saveQuickEdit() {
     // Refresh params
     initEditedParams();
 
-    // Force mermaid re-render by incrementing key
-    mermaidKey.value++;
-    nextTick(() => renderMermaid());
-
     quickEditSuccess.value = true;
     setTimeout(() => { quickEditSuccess.value = false; }, 3000);
 
@@ -315,7 +315,6 @@ function handleAIResponse(response: ChatResponse) {
               if (updated) {
                 selectedRule.value = updated;
                 initEditedParams();
-                nextTick(() => renderMermaid());
               }
             }
           });
@@ -481,9 +480,6 @@ function selectRule(rule: SavedRule) {
   aiResponse.value = null;
   aiError.value = null;
   initEditedParams();
-  nextTick(() => {
-    renderMermaid();
-  });
 }
 
 function formatDate(dateStr: string): string {
@@ -503,69 +499,6 @@ function getAuthor(createdBy: string): { label: string; icon: string } {
   }
   return { label: 'User', icon: '👤' };
 }
-
-function extractMermaidDiagram(code: string): string | null {
-  const mermaidMatch = code.match(/\/\*\s*mermaid\s*\n([\s\S]*?)\*\//i);
-  if (mermaidMatch) {
-    return mermaidMatch[1].trim();
-  }
-  return null;
-}
-
-function generateRuleFlowchart(rule: SavedRule): string {
-  const code = rule.code;
-  const hasDefectCheck = /defects|detections/i.test(code);
-  const hasThreshold = /threshold|confidence/i.test(code);
-  const hasReject = /reject/i.test(code);
-  const hasAlert = /alert/i.test(code);
-  const hasPass = /pass/i.test(code);
-
-  let diagram = 'graph TD\n';
-  diagram += '  A["📥 Detection Event"] --> B{"Check Conditions"}\n';
-
-  if (hasDefectCheck) {
-    diagram += '  B -->|"Defects Found"| C{"Threshold Check"}\n';
-    diagram += '  B -->|"No Defects"| D["✅ Pass"]\n';
-    if (hasThreshold) {
-      if (hasReject) diagram += '  C -->|"Above Threshold"| E["❌ Reject"]\n';
-      if (hasAlert) diagram += '  C -->|"Warning Level"| F["⚠️ Alert"]\n';
-      if (hasPass) diagram += '  C -->|"Below Threshold"| D\n';
-    }
-  } else {
-    if (hasAlert) diagram += '  B -->|"Condition Met"| F["⚠️ Alert"]\n';
-    if (hasReject) diagram += '  B -->|"Failed"| E["❌ Reject"]\n';
-    if (hasPass || (!hasAlert && !hasReject)) diagram += '  B -->|"OK"| D["✅ Pass"]\n';
-  }
-
-  return diagram;
-}
-
-function getMermaidContent(rule: SavedRule): string {
-  const embedded = extractMermaidDiagram(rule.code);
-  if (embedded) return embedded;
-  return generateRuleFlowchart(rule);
-}
-
-async function renderMermaid() {
-  await nextTick();
-  try {
-    window.mermaid?.run({ querySelector: '.rule-mermaid' });
-  } catch (err) {
-    console.error('Mermaid render error:', err);
-  }
-}
-
-function refreshMermaid() {
-  // Increment key to force Vue to recreate the DOM element
-  mermaidKey.value++;
-  nextTick(() => renderMermaid());
-}
-
-watch(selectedRule, () => {
-  if (selectedRule.value) {
-    renderMermaid();
-  }
-});
 
 const sortedRules = computed(() => {
   return [...rules.value].sort((a, b) =>
@@ -760,16 +693,46 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Mermaid Diagram -->
+          <!-- Socket Metadata Panel — visual rule composition in Rule Graph editor (Spec G) -->
           <div class="detail-section">
-            <div class="section-header">
-              <h4>Logic Flow</h4>
-              <button class="refresh-mermaid-btn" @click="refreshMermaid" title="Refresh diagram">
-                ↻
-              </button>
-            </div>
-            <div class="mermaid-container">
-              <div class="rule-mermaid" :key="mermaidKey">{{ getMermaidContent(selectedRule) }}</div>
+            <h4>Socket Metadata</h4>
+            <div class="socket-meta-panel">
+              <div class="socket-meta-row">
+                <span class="socket-meta-label">Signal Type</span>
+                <span
+                  class="socket-type-badge"
+                  :style="{ background: socketTypeColor(selectedRule.socket_type) }"
+                >
+                  {{ selectedRule.socket_type || 'any.boolean' }}
+                </span>
+              </div>
+
+              <div class="socket-meta-row" v-if="selectedRule.reads && selectedRule.reads.length">
+                <span class="socket-meta-label">Reads</span>
+                <div class="socket-field-list">
+                  <span
+                    v-for="field in selectedRule.reads"
+                    :key="field"
+                    class="socket-field-tag"
+                  >{{ field }}</span>
+                </div>
+              </div>
+
+              <div class="socket-meta-row" v-if="selectedRule.produces && selectedRule.produces.length">
+                <span class="socket-meta-label">Produces</span>
+                <div class="socket-field-list">
+                  <span
+                    v-for="action in selectedRule.produces"
+                    :key="action"
+                    class="socket-action-tag"
+                    :class="'action-' + action"
+                  >{{ action }}</span>
+                </div>
+              </div>
+
+              <div class="socket-meta-hint">
+                Visual rule composition → Rule Graph editor (Spec G)
+              </div>
             </div>
           </div>
 
@@ -1240,34 +1203,80 @@ onUnmounted(() => {
   background: #164e63;
 }
 
-.mermaid-container {
+/* Socket Metadata Panel */
+.socket-meta-panel {
+  padding: 16px;
   background: #0F172A;
   border-radius: 8px;
-  padding: 16px;
-  overflow-x: auto;
-}
-
-.refresh-mermaid-btn {
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: #334155;
-  color: #E2E8F0;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 1rem;
+  border: 1px solid #334155;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.refresh-mermaid-btn:hover {
-  background: #6366F1;
-  transform: rotate(180deg);
+.socket-meta-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
 
-.rule-mermaid { min-height: 120px; }
+.socket-meta-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  min-width: 80px;
+  padding-top: 3px;
+}
+
+.socket-type-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  padding: 3px 10px;
+  border-radius: 12px;
+  letter-spacing: 0.02em;
+}
+
+.socket-field-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.socket-field-tag {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  color: #94a3b8;
+  background: #1E293B;
+  border: 1px solid #334155;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.socket-action-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.action-pass    { background: #14532d; color: #4ade80; }
+.action-reject  { background: #450a0a; color: #f87171; }
+.action-alert   { background: #451a03; color: #fb923c; }
+.action-log     { background: #1e1b4b; color: #818cf8; }
+.action-modbus_write { background: #042f2e; color: #2dd4bf; }
+
+.socket-meta-hint {
+  font-size: 11px;
+  color: #475569;
+  font-style: italic;
+  padding-top: 4px;
+  border-top: 1px solid #1E293B;
+}
 
 .code-viewer {
   background: #0F172A;
