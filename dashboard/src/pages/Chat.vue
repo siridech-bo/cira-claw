@@ -196,29 +196,47 @@ function handleKeydown(event: KeyboardEvent) {
 
 /**
  * Render message content with Mermaid diagrams and code blocks.
+ *
+ * Security: We escape HTML to prevent XSS, then restore our own formatted tags.
  * Mermaid regex MUST run before generic code block regex.
  */
 function renderContent(content: string): string {
-  let html = content;
+  // Step 1: Extract code blocks and mermaid blocks before escaping
+  const codeBlocks: string[] = [];
+  const mermaidBlocks: string[] = [];
 
-  // Strip <script> tags for XSS protection
-  html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  // Store mermaid blocks (process first to handle them separately)
+  let html = content.replace(/```mermaid\n([\s\S]*?)```/g, (_, code) => {
+    mermaidBlocks.push(code);
+    return `__MERMAID_${mermaidBlocks.length - 1}__`;
+  });
 
-  // 1. Mermaid diagrams — MUST come first before generic code blocks
-  html = html.replace(
-    /```mermaid\n([\s\S]*?)```/g,
-    '<div class="mermaid" style="margin:12px 0;background:#1e293b;padding:16px;border-radius:8px;overflow-x:auto">$1</div>'
-  );
+  // Store code blocks
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    codeBlocks.push(code);
+    return `__CODE_${codeBlocks.length - 1}__`;
+  });
 
-  // 2. Generic code blocks — styled pre/code
-  html = html.replace(
-    /```(\w*)\n([\s\S]*?)```/g,
-    '<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;margin:8px 0;font-family:\'JetBrains Mono\',monospace"><code>$2</code></pre>'
-  );
+  // Step 2: Escape HTML to prevent XSS (on the non-code portions)
+  html = html
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 
-  // Convert newlines to <br> for plain text portions (preserving whitespace)
-  // But don't affect content inside <pre> or <div class="mermaid">
-  // Simple approach: just preserve whitespace with CSS (white-space: pre-wrap)
+  // Step 3: Restore mermaid blocks with proper styling
+  html = html.replace(/__MERMAID_(\d+)__/g, (_, idx) => {
+    const code = mermaidBlocks[parseInt(idx)];
+    return `<div class="mermaid" style="margin:12px 0;background:#1e293b;padding:16px;border-radius:8px;overflow-x:auto">${code}</div>`;
+  });
+
+  // Step 4: Restore code blocks with proper styling
+  html = html.replace(/__CODE_(\d+)__/g, (_, idx) => {
+    const code = codeBlocks[parseInt(idx)]
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return `<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;margin:8px 0;white-space:pre-wrap;font-family:'JetBrains Mono',Consolas,monospace"><code>${code}</code></pre>`;
+  });
 
   return html;
 }

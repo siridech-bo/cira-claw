@@ -2,15 +2,21 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { NodeManager } from '../../nodes/manager.js';
 import { NodeConfig, NodeConfigSchema } from '../../utils/config-schema.js';
 import { RuleEngine } from '../../services/rule-engine.js';
+import { StatsCollector } from '../../services/stats-collector.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('api-routes');
 
-// Module-level ruleEngine reference for rules API
+// Module-level references for rules API
 let _ruleEngine: RuleEngine | null = null;
+let _statsCollector: StatsCollector | null = null;
 
 export function setRuleEngine(engine: RuleEngine): void {
   _ruleEngine = engine;
+}
+
+export function setStatsCollector(collector: StatsCollector): void {
+  _statsCollector = collector;
 }
 
 interface NodeParams {
@@ -358,7 +364,33 @@ export async function registerApiRoutes(
           };
         }
 
-        const data = await response.json() as { models?: unknown[]; models_dir?: string };
+        // Runtime may return malformed JSON with unescaped Windows backslashes
+        // Read as text and fix before parsing
+        const text = await response.text();
+
+        // Fix Windows path backslashes by escaping single backslashes
+        // that aren't part of valid JSON escape sequences
+        let fixed = '';
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === '\\') {
+            if (i + 1 < text.length) {
+              const next = text[i + 1];
+              // Check if this is a valid JSON escape sequence: \" \\ \/ \b \f \n \r \t \u
+              if ('\\"\/bfnrtu'.includes(next)) {
+                // Valid escape, copy both characters
+                fixed += text[i] + next;
+                i++; // Skip next char since we already added it
+                continue;
+              }
+            }
+            // Single backslash or invalid escape sequence, double it
+            fixed += '\\\\';
+          } else {
+            fixed += text[i];
+          }
+        }
+
+        const data = JSON.parse(fixed) as { models?: unknown[]; models_dir?: string };
         return {
           nodeId: id,
           current: nodeManager.getNodeStatus(id)?.inference?.modelName || null,
@@ -598,6 +630,16 @@ export async function registerApiRoutes(
 
     const rules = _ruleEngine.loadRules();
     return { rules };
+  });
+
+  // Get rule evaluation results (v3 API for Spec G)
+  fastify.get('/api/rules/results', async (_request: FastifyRequest, _reply: FastifyReply) => {
+    if (!_statsCollector) {
+      // Return empty state if StatsCollector not available yet
+      return { evaluated_at: '', results: {} };
+    }
+
+    return _statsCollector.getRuleResults();
   });
 
   // Get single rule

@@ -65,10 +65,12 @@ export async function buildSystemPrompt(workspacePath: string, skills: Skill[]):
                 name?: string;
                 description?: string;
                 enabled?: boolean;
+                socket_type?: string;
                 tags?: string[];
               };
-              const tags = meta.tags?.join(', ') || '';
-              parts.push(`- ${meta.name}: ${meta.description} [${meta.enabled ? 'enabled' : 'disabled'}]${tags ? ` (${tags})` : ''}`);
+              const status = meta.enabled ? 'enabled' : 'disabled';
+              const socketType = meta.socket_type || 'any.boolean';
+              parts.push(`- ${meta.name} [${socketType}] (${status}): ${meta.description}`);
             }
           } catch {
             // Skip unparseable rule
@@ -115,13 +117,66 @@ and troubleshoot AI vision systems on the production floor.
 5. Keep responses concise and actionable
 6. Highlight any concerning values (high temperature, low FPS, offline devices)
 
-## Rule Engine Guidelines
-1. Use existing tools (inference_stats, alert_list) for questions they can answer. Use js_query only when custom data processing is needed.
-2. When creating rules (js_rule_create), always set appropriate tags and signal_type.
-3. Rules receive a 'payload' object: detections (array), stats (object), hourly (array), node info.
-4. Rules must return: { action: 'pass'|'reject'|'alert'|'log'|'modbus_write', reason/message, ... }
-5. Keep generated code simple — flat logic, no closures, no helper functions.
-6. Always show the operator a Mermaid diagram of the rule logic. They see diagrams, not code.
+## Atomic Rule Guidelines
+
+### What atomic rules can and cannot do
+Atomic rules are SYNCHRONOUS and STATELESS. Each evaluation is independent.
+They CAN: compare payload values, count detections, filter by label, check confidence.
+They CANNOT: maintain counters across frames, call external services, use async/await,
+  use require() or import, access the filesystem, or chain to other rules.
+
+If the operator's request requires any of the following, the rule is NOT atomic:
+- "...for N consecutive frames"
+- "...if this happens 3 times in 5 minutes"
+- "...then save an image to disk"
+- "...then POST to our MES system"
+- "...AND also check if FPS is normal"
+In these cases: create the individual atomic conditions separately, then tell the
+operator that combining them requires the Rule Graph editor (coming soon).
+
+### Socket type inference — mandatory for js_rule_create
+After generating rule code, ALWAYS infer socket metadata before calling js_rule_create.
+
+Decision tree (apply in this order, first match wins):
+1. Code accesses payload.detections[X].confidence or .confidence?
+   → socket_type: "vision.confidence"
+   → reads: include "detections[].confidence"
+2. Code accesses payload.detections (length, label, x, y, w, h) or payload.stats.by_label?
+   → socket_type: "vision.detection"
+   → reads: list the specific paths accessed
+3. Code accesses payload.stats.defects_per_hour or payload.hourly?
+   → socket_type: "signal.rate"
+   → reads: list the specific paths accessed
+4. Code accesses payload.stats.fps, payload.stats.uptime_sec, or other numeric stats?
+   → socket_type: "signal.threshold"
+   → reads: list the specific paths accessed
+5. Code accesses payload.node.status or payload.frame.number?
+   → socket_type: "system.health"
+   → reads: list the specific paths accessed
+6. None of the above, or code accesses multiple unrelated regions:
+   → socket_type: "any.boolean"
+   → reads: list all accessed paths
+
+For "reads": list every payload.X path in the code. Use dot notation.
+  Array element fields: "detections[].label" not "detections[0].label"
+For "produces": inspect every return statement. Collect unique action values.
+  Example: two returns { action: 'pass' } and { action: 'reject' } → produces: ["pass", "reject"]
+
+Rules missing socket_type, reads, or produces are rejected by the save handler.
+Do not skip this inference step.
+
+### Code style for generated rules
+- Use var, not let or const (broader sandbox compatibility)
+- No arrow functions — use function() {}
+- No template literals — use string concatenation
+- No destructuring assignment
+- All logic synchronous — no Promise, no async, no setTimeout
+- Return value must be: { action: 'pass'|'reject'|'alert'|'log'|'modbus_write', ... }
+- Always include a default return { action: 'pass' } path
+
+### When to use js_query vs js_rule_create
+Use js_query when: the operator wants a one-time answer about current data.
+Use js_rule_create when: the operator wants ongoing automatic monitoring.
 
 ## Operational Memory
 // Spec E (Operation Recipe Memory) will inject operational context here:

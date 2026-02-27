@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import { getConfigLoader, ConfigLoader } from './config.js';
 import { createGatewayServer, GatewayServer } from './gateway/server.js';
-import { registerApiRoutes, setRuleEngine } from './gateway/routes/api.js';
+import { registerApiRoutes, setRuleEngine, setStatsCollector } from './gateway/routes/api.js';
 import { registerWebSocketRoutes, WebSocketHandler } from './gateway/websocket.js';
 import { registerChatRoutes } from './gateway/chat.js';
 import { getNodeManager, NodeManager } from './nodes/manager.js';
@@ -285,6 +285,7 @@ async function main(): Promise<void> {
     const rulesDir = path.join(configDir, 'rules');
     ruleEngine = createRuleEngine(rulesDir);
     setRuleEngine(ruleEngine); // Wire rule engine to API routes
+    setStatsCollector(statsCollector); // Wire stats collector for /api/rules/results
     logger.info(`Rule engine initialized: ${rulesDir}`);
 
     // TEMPORARY — Spec D replaces this

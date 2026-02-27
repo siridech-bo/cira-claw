@@ -7,8 +7,17 @@ export default defineConfig({
     port: 3000,
     strictPort: false,
     proxy: {
-      // Proxy runtime APIs to the C runtime on port 8080
-      '/api/nodes': 'http://localhost:8080',
+      // Proxy node management APIs to gateway (18790) which handles JSON fixing
+      '/api/nodes': 'http://localhost:18790',
+      '/api/rules': 'http://localhost:18790',
+      '/api/status': 'http://localhost:18790',
+      '/health': 'http://localhost:18790',
+      // Proxy chat websocket to gateway
+      '/chat': {
+        target: 'ws://localhost:18790',
+        ws: true,
+      },
+      // Proxy direct runtime APIs to C++ runtime on port 8080
       '/api/cameras': 'http://localhost:8080',
       '/api/files': 'http://localhost:8080',
       '/api/model': 'http://localhost:8080',
@@ -24,14 +33,6 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
       },
-      // Proxy cira-edge gateway endpoints (chat, API)
-      '/chat': {
-        target: 'ws://localhost:18790',
-        ws: true,
-      },
-      '/api/status': 'http://localhost:18790',
-      '/api/rules': 'http://localhost:18790',
-      '/health': 'http://localhost:18790',
     },
   },
   build: {

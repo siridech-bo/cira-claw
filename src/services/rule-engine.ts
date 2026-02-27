@@ -2,8 +2,13 @@ import ivm from 'isolated-vm';
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from '../utils/logger.js';
+import { SocketType, SOCKET_TYPES, isValidSocketType } from './socket-registry.js';
 
 const logger = createLogger('rule-engine');
+
+// Re-export socket types for convenience
+export type { SocketType } from './socket-registry.js';
+export { isValidSocketType } from './socket-registry.js';
 
 // ─── Payload ────────────────────────────────────────────────────────────────
 // The data object passed into every rule and query execution.
@@ -68,34 +73,45 @@ export interface RuleAction {
 
 export interface RuleResult {
   success: boolean;
-  result?: unknown;    // For js_query: the computed answer
-  action?: RuleAction; // For js_rule: the action to take
+  result?: unknown;       // For js_query: the computed answer
+  action?: RuleAction;    // For js_rule: the action to take
+  socket_type: SocketType; // v3: Required socket type classification
+  reads?: string[];       // v3: Payload fields this rule reads
+  produces?: string[];    // v3: Action types this rule can produce
   error?: string;
   execution_ms: number;
-  code: string;        // Echoed back for agent to include in response
+  code: string;           // Echoed back for agent to include in response
 }
 
 // ─── Saved Rule ───────────────────────────────────────────────────────────────
 // This is the format stored in ~/.cira/rules/*.js and the in-memory representation.
 //
-// 'tags' and 'signal_type' are operational metadata for internal rule management.
-// They are optional — existing rules without them remain valid.
-// They enable future queries like "list all reject-logic rules" or
-// "which rules apply to vibration signals" once Spec C signals are available.
+// v3 additions:
+// - 'socket_type' classifies the signal domain (required in v3)
+// - 'reads' lists payload fields the rule accesses
+// - 'produces' lists action types the rule can return
+//
+// Legacy fields (kept for backward compatibility):
+// - 'tags' for operational metadata
+// - 'signal_type' is deprecated, use socket_type instead
 //
 // 'node_id' scopes the rule to a specific edge device.
 
 export interface SavedRule {
-  id: string;           // Filename without .js extension
-  name: string;         // Human-readable name
-  description: string;  // What this rule does
-  code: string;         // The JS code (AI-generated)
+  id: string;                              // Filename without .js extension
+  name: string;                            // Human-readable name
+  description: string;                     // What this rule does
+  socket_type: SocketType;                 // v3: Signal category (required)
+  reads: string[];                         // v3: Payload fields accessed
+  produces: RuleAction['action'][];        // v3: Action types returned
+  code: string;                            // The JS code (AI-generated)
   enabled: boolean;
-  created_at: string;   // ISO timestamp
-  created_by: string;   // 'ai-agent' | 'manual'
-  node_id: string;      // Which node this rule applies to (default: 'local-dev')
-  tags?: string[];      // e.g. ['reject-logic', 'defect-rate', 'pcb']
-  signal_type?: string; // 'visual' | 'vibration' | 'current' | 'any' (default: 'visual')
+  created_at: string;                      // ISO timestamp
+  created_by: string;                      // 'ai-agent' | 'manual'
+  node_id?: string;                        // Which node this rule applies to
+  prompt?: string;                         // Original prompt that created the rule
+  tags?: string[];                         // e.g. ['reject-logic', 'defect-rate', 'pcb']
+  signal_type?: string;                    // Deprecated: use socket_type instead
 }
 
 // Maximum active rules
@@ -156,6 +172,7 @@ export class RuleEngine {
       return {
         success: true,
         result,
+        socket_type: 'any.boolean', // Queries have no specific socket type
         execution_ms,
         code,
       };
@@ -167,6 +184,7 @@ export class RuleEngine {
 
       return {
         success: false,
+        socket_type: 'any.boolean',
         error: errorMessage,
         execution_ms,
         code,
@@ -215,6 +233,9 @@ export class RuleEngine {
       return {
         success: true,
         action,
+        socket_type: rule.socket_type,
+        reads: rule.reads,
+        produces: rule.produces,
         execution_ms,
         code: rule.code,
       };
@@ -226,6 +247,9 @@ export class RuleEngine {
 
       return {
         success: false,
+        socket_type: rule.socket_type,
+        reads: rule.reads,
+        produces: rule.produces,
         error: errorMessage,
         execution_ms,
         code: rule.code,
@@ -236,6 +260,11 @@ export class RuleEngine {
   /**
    * Load all rules from the rules directory.
    * Each file has a JSON header comment on line 1.
+   *
+   * v3 backward compatibility:
+   * - Rules created before v3 may lack socket_type, reads, produces
+   * - These default to 'any.boolean' and empty arrays
+   * - A warning is logged for pre-v3 rules
    */
   loadRules(): SavedRule[] {
     const rules: SavedRule[] = [];
@@ -256,14 +285,58 @@ export class RuleEngine {
         // Parse JSON header from first line: // {...}
         if (firstLine.startsWith('// {')) {
           const jsonStr = firstLine.slice(3); // Remove "// "
-          const meta = JSON.parse(jsonStr) as Omit<SavedRule, 'code'>;
+          const meta = JSON.parse(jsonStr) as Record<string, unknown>;
 
           // Extract code (everything after the first line)
           const code = lines.slice(1).join('\n');
 
+          // v3 backward compatibility: default missing fields
+          let socket_type: SocketType = 'any.boolean';
+          let reads: string[] = [];
+          let produces: RuleAction['action'][] = [];
+          let isPreV3 = false;
+
+          if (meta.socket_type && isValidSocketType(meta.socket_type as string)) {
+            socket_type = meta.socket_type as SocketType;
+          } else if (meta.socket_type) {
+            // Invalid socket_type in file — warn and use default
+            logger.warn(`Rule ${file} has invalid socket_type: ${meta.socket_type}, defaulting to 'any.boolean'`);
+            isPreV3 = true;
+          } else {
+            isPreV3 = true;
+          }
+
+          if (Array.isArray(meta.reads)) {
+            reads = meta.reads as string[];
+          } else {
+            isPreV3 = true;
+          }
+
+          if (Array.isArray(meta.produces)) {
+            produces = meta.produces as RuleAction['action'][];
+          } else {
+            isPreV3 = true;
+          }
+
+          if (isPreV3) {
+            logger.warn(`Rule ${file} predates socket type standard (v3). Consider re-creating via js_rule_create.`);
+          }
+
           const rule: SavedRule = {
-            ...meta,
+            id: meta.id as string,
+            name: meta.name as string,
+            description: meta.description as string,
+            socket_type,
+            reads,
+            produces,
             code,
+            enabled: meta.enabled as boolean ?? true,
+            created_at: meta.created_at as string ?? new Date().toISOString(),
+            created_by: meta.created_by as string ?? 'unknown',
+            node_id: meta.node_id as string,
+            prompt: meta.prompt as string,
+            tags: meta.tags as string[],
+            signal_type: meta.signal_type as string, // Keep for legacy compatibility
           };
 
           rules.push(rule);
@@ -281,36 +354,67 @@ export class RuleEngine {
 
   /**
    * Save a rule to disk with JSON header format.
+   *
+   * v3 validation:
+   * - socket_type must be a valid SocketType
+   * - reads must be a non-empty array (warning if empty)
+   * - produces must be a non-empty array (error if empty)
+   * - id must be filename-safe (lowercase-hyphenated)
    */
   saveRule(rule: SavedRule): void {
     this.ensureRulesDir();
 
+    // Validate socket_type
+    if (!isValidSocketType(rule.socket_type)) {
+      throw new Error(`Invalid socket_type: ${rule.socket_type}. Must be one of: ${SOCKET_TYPES.join(', ')}`);
+    }
+
+    // Validate id is filename-safe
+    if (!/^[a-z0-9-]+$/.test(rule.id)) {
+      throw new Error(`Invalid rule id: ${rule.id}. Must be lowercase letters, numbers, and hyphens only.`);
+    }
+
+    // Validate reads
+    if (!Array.isArray(rule.reads)) {
+      throw new Error(`Missing 'reads' field. Must be an array of payload field paths.`);
+    }
+
+    // Validate produces
+    if (!Array.isArray(rule.produces) || rule.produces.length === 0) {
+      throw new Error(`Missing or empty 'produces' field. Must be a non-empty array of action types.`);
+    }
+
     const filePath = path.join(this.rulesDir, `${rule.id}.js`);
 
     // Build metadata object (excluding code)
-    const meta: Omit<SavedRule, 'code'> = {
+    const meta: Record<string, unknown> = {
       id: rule.id,
       name: rule.name,
       description: rule.description,
+      socket_type: rule.socket_type,
+      reads: rule.reads,
+      produces: rule.produces,
       enabled: rule.enabled,
       created_at: rule.created_at,
       created_by: rule.created_by,
-      node_id: rule.node_id,
     };
 
-    // Only include tags and signal_type if they are set
+    // Optional fields
+    if (rule.node_id) {
+      meta.node_id = rule.node_id;
+    }
+    if (rule.prompt) {
+      meta.prompt = rule.prompt;
+    }
     if (rule.tags && rule.tags.length > 0) {
       meta.tags = rule.tags;
-    }
-    if (rule.signal_type) {
-      meta.signal_type = rule.signal_type;
     }
 
     // Write file: JSON header + code
     const content = `// ${JSON.stringify(meta)}\n${rule.code}`;
     fs.writeFileSync(filePath, content, 'utf-8');
 
-    logger.info(`Saved rule: ${rule.id}`);
+    logger.info(`Saved rule: ${rule.id} [${rule.socket_type}]`);
   }
 
   /**
@@ -349,9 +453,50 @@ export class RuleEngine {
   }
 
   /**
+   * Evaluate all enabled rules and return a Map of rule ID to RuleResult.
+   * This is the v3 API used by StatsCollector.getRuleResults().
+   *
+   * Hard cap: evaluates at most MAX_ACTIVE_RULES rules.
+   * Warns if total cycle time exceeds TOTAL_RULE_CYCLE_MS.
+   */
+  async evaluateAll(payload: RulePayload): Promise<Map<string, RuleResult>> {
+    const startTime = performance.now();
+    const results = new Map<string, RuleResult>();
+
+    // Load enabled rules, sorted by creation date (oldest first)
+    let rules = this.loadRules()
+      .filter(r => r.enabled)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    // Hard cap at MAX_ACTIVE_RULES
+    if (rules.length > MAX_ACTIVE_RULES) {
+      logger.warn(`Rule cap exceeded: ${rules.length} enabled rules found, only evaluating first ${MAX_ACTIVE_RULES}`);
+      rules = rules.slice(0, MAX_ACTIVE_RULES);
+    }
+
+    for (const rule of rules) {
+      const result = await this.evaluateRule(rule, payload);
+      results.set(rule.id, result);
+
+      if (!result.success) {
+        logger.error({ ruleId: rule.id, error: result.error }, 'Rule evaluation error');
+      }
+    }
+
+    const totalMs = performance.now() - startTime;
+    if (totalMs > TOTAL_RULE_CYCLE_MS) {
+      logger.warn({ totalMs, ruleCount: rules.length }, `Rule cycle exceeded ${TOTAL_RULE_CYCLE_MS}ms budget`);
+    }
+
+    return results;
+  }
+
+  /**
    * Evaluate all enabled rules against the provided payload.
    * Returns array of actions for the caller to dispatch.
    * If any rule throws or times out, logs error and continues.
+   *
+   * @deprecated Use evaluateAll() for v3 API with socket metadata.
    */
   async evaluateAllRules(payload: RulePayload): Promise<RuleAction[]> {
     const startTime = performance.now();

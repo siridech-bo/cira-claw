@@ -3,7 +3,7 @@ import { NodeConfig, AlertsConfig } from '../utils/config-schema.js';
 import { NodeManager } from '../nodes/manager.js';
 import { MqttChannel } from '../channels/mqtt.js';
 import { createLogger } from '../utils/logger.js';
-import { RuleEngine, RulePayload, RuleAction } from './rule-engine.js';
+import { RuleEngine, RulePayload, RuleAction, RuleResult, SocketType } from './rule-engine.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -47,6 +47,10 @@ export class StatsCollector extends EventEmitter {
 
   // Rule engine for automated rule evaluation
   private ruleEngine: RuleEngine | null = null;
+
+  // v3: Cache for rule results (used by /api/rules/results)
+  private lastRuleResults: Map<string, RuleResult> | null = null;
+  private lastRuleResultsAt: string = '';
 
   constructor(
     nodeManager: NodeManager,
@@ -187,9 +191,18 @@ export class StatsCollector extends EventEmitter {
       if (this.ruleEngine) {
         const payload = await this.buildPayload(node.id);
         if (payload) {
-          const actions = await this.ruleEngine.evaluateAllRules(payload);
-          for (const action of actions) {
-            this.handleRuleAction(node.id, action);
+          // v3: Use evaluateAll() and cache results for /api/rules/results
+          const results = await this.ruleEngine.evaluateAll(payload);
+
+          // Cache results
+          this.lastRuleResults = results;
+          this.lastRuleResultsAt = new Date().toISOString();
+
+          // Dispatch non-pass actions
+          for (const [ruleId, result] of results) {
+            if (result.success && result.action && result.action.action !== 'pass') {
+              this.handleRuleAction(node.id, result.action);
+            }
           }
         }
       }
@@ -449,6 +462,56 @@ export class StatsCollector extends EventEmitter {
       node: { id: nodeId, status: stats.modelLoaded ? 'running' : 'offline' },
       // signals: {} — reserved for Spec C, leave undefined
     };
+  }
+
+  /**
+   * Handle a rule action by dispatching to appropriate channels.
+   */
+  /**
+   * Get cached rule evaluation results for /api/rules/results endpoint.
+   * Returns the results from the most recent evaluation cycle.
+   *
+   * Used by Spec G's composite evaluator to read atomic rule states.
+   */
+  getRuleResults(): {
+    evaluated_at: string;
+    results: Record<string, {
+      action: RuleAction | undefined;
+      socket_type: SocketType;
+      reads: string[];
+      produces: string[];
+      execution_ms: number;
+      success: boolean;
+      error?: string;
+    }>;
+  } {
+    if (!this.lastRuleResults) {
+      return { evaluated_at: '', results: {} };
+    }
+
+    const out: Record<string, {
+      action: RuleAction | undefined;
+      socket_type: SocketType;
+      reads: string[];
+      produces: string[];
+      execution_ms: number;
+      success: boolean;
+      error?: string;
+    }> = {};
+
+    for (const [id, result] of this.lastRuleResults) {
+      out[id] = {
+        action: result.action,
+        socket_type: result.socket_type,
+        reads: result.reads ?? [],
+        produces: result.produces ?? [],
+        execution_ms: result.execution_ms,
+        success: result.success,
+        error: result.error,
+      };
+    }
+
+    return { evaluated_at: this.lastRuleResultsAt, results: out };
   }
 
   /**

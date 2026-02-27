@@ -275,38 +275,48 @@ const tools: Tool[] = [
   },
   {
     name: 'js_rule_create',
-    description: 'Create a persistent JavaScript rule that runs automatically on each evaluation cycle. The code must export a function receiving "payload" and returning: { action: "pass"|"reject"|"alert"|"log"|"modbus_write", reason?: string, register?: number, value?: number, severity?: "info"|"warning"|"critical", message?: string }. Rule is dry-run validated before saving.',
+    description: 'Create a persistent JavaScript rule that runs automatically on each evaluation cycle. The code must export a function receiving "payload" and returning: { action: "pass"|"reject"|"alert"|"log"|"modbus_write", reason?: string, register?: number, value?: number, severity?: "info"|"warning"|"critical", message?: string }. Rule is dry-run validated before saving. IMPORTANT: You must specify socket_type, reads, and produces based on what the code accesses.',
     inputSchema: {
       type: 'object',
       properties: {
         name: {
           type: 'string',
-          description: 'Short name (used as filename, lowercase-hyphenated)',
+          description: 'Filename-safe lowercase-hyphenated name',
         },
         description: {
           type: 'string',
-          description: 'Human-readable description of what this rule does',
+          description: 'Human-readable description of what the rule does',
         },
         code: {
           type: 'string',
-          description: 'JavaScript as module.exports function. Example: module.exports = function(payload) { if (payload.detections.length > 5) return { action: "alert", message: "High defect count" }; return { action: "pass" }; }',
+          description: 'JavaScript as module.exports = function(payload) { ... }. Synchronous, stateless, no require.',
         },
         node_id: {
           type: 'string',
           description: 'Node this rule applies to (default: "local-dev")',
+        },
+        socket_type: {
+          type: 'string',
+          enum: ['vision.detection', 'vision.confidence', 'signal.threshold', 'signal.rate', 'system.health', 'any.boolean'],
+          description: 'Signal category this rule evaluates. INFER from which payload fields the code accesses. vision.detection for detections[]/by_label; vision.confidence for detections[].confidence; signal.threshold for stats.fps/uptime; signal.rate for defects_per_hour/hourly; system.health for node.status/frame.number; any.boolean otherwise.',
+        },
+        reads: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Payload field paths this rule reads. Use dot notation: ["detections.length", "stats.fps"]. For array element access: "detections[].label".',
+        },
+        produces: {
+          type: 'array',
+          items: { type: 'string', enum: ['pass', 'reject', 'alert', 'log', 'modbus_write'] },
+          description: 'Action types this rule can return. Inspect every return statement in the code and list unique action values.',
         },
         tags: {
           type: 'array',
           items: { type: 'string' },
           description: 'Optional tags for rule management e.g. ["reject-logic", "defect-rate"]',
         },
-        signal_type: {
-          type: 'string',
-          enum: ['visual', 'vibration', 'current', 'any'],
-          description: 'Signal type this rule operates on (default: "visual")',
-        },
       },
-      required: ['name', 'description', 'code'],
+      required: ['name', 'description', 'code', 'socket_type', 'reads', 'produces'],
     },
   },
   {
@@ -978,11 +988,49 @@ export async function executeToolCall(
       const description = input.description as string;
       const code = input.code as string;
       const nodeId = (input.node_id as string) || 'local-dev';
+      const socket_type = input.socket_type as string;
+      const reads = (input.reads as string[]) || [];
+      const produces = (input.produces as ('pass' | 'reject' | 'alert' | 'log' | 'modbus_write')[]) || [];
       const tags = (input.tags as string[]) || [];
-      const signal_type = (input.signal_type as string) || 'visual';
 
       if (!context?.ruleEngine) {
         return { data: { error: 'Rule engine not available' } };
+      }
+
+      // Import isValidSocketType from rule-engine (re-exported from socket-registry)
+      const { isValidSocketType } = await import('../services/rule-engine.js');
+
+      // Validate socket_type
+      if (!socket_type || !isValidSocketType(socket_type)) {
+        return {
+          data: {
+            success: false,
+            error: `Invalid socket_type: ${socket_type}. Must be one of: vision.detection, vision.confidence, signal.threshold, signal.rate, system.health, any.boolean`,
+            code,
+          },
+        };
+      }
+
+      // Validate reads
+      if (!Array.isArray(reads)) {
+        return {
+          data: {
+            success: false,
+            error: `Missing 'reads' field. Must be an array of payload field paths.`,
+            code,
+          },
+        };
+      }
+
+      // Validate produces
+      if (!Array.isArray(produces) || produces.length === 0) {
+        return {
+          data: {
+            success: false,
+            error: `Missing or empty 'produces' field. Must be a non-empty array of action types.`,
+            code,
+          },
+        };
       }
 
       const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -1000,18 +1048,26 @@ export async function executeToolCall(
         id,
         name,
         description,
+        socket_type,
+        reads,
+        produces,
         code,
         enabled: true,
         created_at: new Date().toISOString(),
         created_by: 'ai-agent',
         node_id: nodeId,
         tags,
-        signal_type,
       };
 
+      // Dry-run: validate the rule executes correctly
       const dryRun = await context.ruleEngine.evaluateRule(rule, testPayload);
       if (!dryRun.success) {
         return { data: { success: false, error: `Rule validation failed: ${dryRun.error}`, code } };
+      }
+
+      // Validate dry-run action is in produces array (warn, not hard fail)
+      if (dryRun.action && !produces.includes(dryRun.action.action)) {
+        logger.warn(`Rule ${id} dry-run returned '${dryRun.action.action}' which is not in produces array`);
       }
 
       const validActions = ['pass', 'reject', 'alert', 'log', 'modbus_write'];
@@ -1033,8 +1089,10 @@ export async function executeToolCall(
           rule_id: id,
           name,
           description,
+          socket_type,
+          reads,
+          produces,
           tags,
-          signal_type,
           dry_run_result: dryRun.action,
           execution_ms: dryRun.execution_ms,
           code,
@@ -1070,10 +1128,12 @@ export async function executeToolCall(
                 id: r.id,
                 name: r.name,
                 description: r.description,
+                socket_type: r.socket_type,
+                reads: r.reads,
+                produces: r.produces,
                 enabled: r.enabled,
                 node_id: r.node_id,
                 tags: r.tags || [],
-                signal_type: r.signal_type || 'visual',
                 created_at: r.created_at,
                 created_by: r.created_by,
               })),
