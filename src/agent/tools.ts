@@ -4,6 +4,8 @@ import os from 'os';
 import { NodeSSH } from 'node-ssh';
 import { createLogger } from '../utils/logger.js';
 import { RuleEngine, RulePayload, SavedRule } from '../services/rule-engine.js';
+import { StateStore, CompositeRule, CompositeNode, CompositeConnection, OutputAction } from '../services/state-store.js';
+import { CompositeRuleEngine } from '../services/composite-rule-engine.js';
 
 const logger = createLogger('tools');
 
@@ -94,6 +96,8 @@ export interface ToolContext {
   };
   alertsConfig?: AlertsConfig;
   ruleEngine?: RuleEngine;
+  // Spec G: Composite rule engine
+  compositeRuleEngine?: CompositeRuleEngine;
   // Spec D stub — Heartbeat Scheduler (not yet implemented)
   heartbeatScheduler?: HeartbeatScheduler;
   // Spec E stub — Memory Manager (not yet implemented)
@@ -344,6 +348,75 @@ const tools: Tool[] = [
         },
       },
       required: ['action'],
+    },
+  },
+  // Spec G: Composite rule tools
+  {
+    name: 'composite_rule_list',
+    description: 'List all composite rules (Spec G). Composite rules combine atomic rules via logic gates (AND, OR, NOT) to form complex conditions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled_only: {
+          type: 'boolean',
+          description: 'If true, only return enabled composite rules',
+        },
+      },
+    },
+  },
+  {
+    name: 'composite_rule_create',
+    description: 'Create a composite rule that combines multiple atomic rules via logic gates. The rule graph is edited visually in the Rule Graph dashboard page. This tool creates an empty composite rule skeleton that the operator can then configure in the UI.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Human-readable name for the composite rule',
+        },
+        description: {
+          type: 'string',
+          description: 'Description of what this composite rule does',
+        },
+        output_action: {
+          type: 'string',
+          enum: ['pass', 'reject', 'alert', 'log', 'modbus_write'],
+          description: 'Default action when composite triggers (can be overridden in output nodes)',
+        },
+      },
+      required: ['name', 'description'],
+    },
+  },
+  {
+    name: 'composite_rule_toggle',
+    description: 'Enable or disable a composite rule',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rule_id: {
+          type: 'string',
+          description: 'ID of the composite rule',
+        },
+        enabled: {
+          type: 'boolean',
+          description: 'Whether to enable (true) or disable (false) the rule',
+        },
+      },
+      required: ['rule_id', 'enabled'],
+    },
+  },
+  {
+    name: 'composite_rule_delete',
+    description: 'Delete a composite rule',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rule_id: {
+          type: 'string',
+          description: 'ID of the composite rule to delete',
+        },
+      },
+      required: ['rule_id'],
     },
   },
 ];
@@ -1184,6 +1257,144 @@ export async function executeToolCall(
         default:
           return { data: { error: `Unknown action: ${action}` } };
       }
+    }
+
+    // Spec G: Composite rule tools
+    case 'composite_rule_list': {
+      const enabledOnly = input.enabled_only as boolean || false;
+
+      if (!context?.compositeRuleEngine) {
+        return { data: { error: 'Composite rule engine not available' } };
+      }
+
+      const stateStore = context.compositeRuleEngine.getStateStore();
+      const rules = stateStore.getAllCompositeRules(enabledOnly);
+
+      return {
+        data: {
+          rules: rules.map(r => ({
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            enabled: r.enabled,
+            created_at: r.created_at,
+            created_by: r.created_by,
+            node_count: r.nodes.length,
+            connection_count: r.connections.length,
+            output_action: r.output_action.action,
+          })),
+          count: rules.length,
+        },
+      };
+    }
+
+    case 'composite_rule_create': {
+      const name = input.name as string;
+      const description = input.description as string;
+      const outputAction = (input.output_action as string) || 'alert';
+
+      if (!context?.compositeRuleEngine) {
+        return { data: { error: 'Composite rule engine not available' } };
+      }
+
+      const stateStore = context.compositeRuleEngine.getStateStore();
+      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+      // Check if rule with this ID already exists
+      const existing = stateStore.getCompositeRule(id);
+      if (existing) {
+        return {
+          data: {
+            success: false,
+            error: `Composite rule with id '${id}' already exists`,
+          },
+        };
+      }
+
+      const rule: CompositeRule = {
+        id,
+        name,
+        description,
+        enabled: false, // Start disabled until configured
+        created_at: new Date().toISOString(),
+        created_by: 'ai-agent',
+        nodes: [],
+        connections: [],
+        output_action: {
+          action: outputAction as OutputAction['action'],
+        },
+      };
+
+      stateStore.saveCompositeRule(rule);
+
+      return {
+        data: {
+          success: true,
+          rule_id: id,
+          name,
+          description,
+          message: `Composite rule '${name}' created. Configure it in the Rule Graph dashboard page.`,
+          dashboard_url: '/rule-graph',
+        },
+      };
+    }
+
+    case 'composite_rule_toggle': {
+      const ruleId = input.rule_id as string;
+      const enabled = input.enabled as boolean;
+
+      if (!context?.compositeRuleEngine) {
+        return { data: { error: 'Composite rule engine not available' } };
+      }
+
+      const stateStore = context.compositeRuleEngine.getStateStore();
+      const success = stateStore.setCompositeRuleEnabled(ruleId, enabled);
+
+      if (!success) {
+        return {
+          data: {
+            success: false,
+            error: `Composite rule '${ruleId}' not found`,
+          },
+        };
+      }
+
+      return {
+        data: {
+          success: true,
+          rule_id: ruleId,
+          enabled,
+          message: `Composite rule '${ruleId}' ${enabled ? 'enabled' : 'disabled'}`,
+        },
+      };
+    }
+
+    case 'composite_rule_delete': {
+      const ruleId = input.rule_id as string;
+
+      if (!context?.compositeRuleEngine) {
+        return { data: { error: 'Composite rule engine not available' } };
+      }
+
+      const stateStore = context.compositeRuleEngine.getStateStore();
+      const success = stateStore.deleteCompositeRule(ruleId);
+
+      if (!success) {
+        return {
+          data: {
+            success: false,
+            error: `Composite rule '${ruleId}' not found`,
+          },
+        };
+      }
+
+      return {
+        data: {
+          success: true,
+          rule_id: ruleId,
+          message: `Composite rule '${ruleId}' deleted`,
+        },
+      };
     }
 
     default:

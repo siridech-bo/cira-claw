@@ -14,6 +14,9 @@ import { createMqttChannel, MqttChannel } from './channels/mqtt.js';
 import { createStatsCollector, StatsCollector } from './services/stats-collector.js';
 import { createModbusServer, ModbusServer } from './services/modbus-server.js';
 import { createRuleEngine, RuleEngine } from './services/rule-engine.js';
+import { createStateStore, StateStore } from './services/state-store.js';
+import { createCompositeRuleEngine, CompositeRuleEngine } from './services/composite-rule-engine.js';
+import { createActionRunner, ActionRunner } from './services/action-runner.js';
 import { createLogger, logger as rootLogger } from './utils/logger.js';
 import { CiraConfig } from './utils/config-schema.js';
 
@@ -30,6 +33,9 @@ let mqttChannel: MqttChannel | null = null;
 let statsCollector: StatsCollector | null = null;
 let modbusServer: ModbusServer | null = null;
 let ruleEngine: RuleEngine | null = null;
+let stateStore: StateStore | null = null;
+let compositeRuleEngine: CompositeRuleEngine | null = null;
+let actionRunner: ActionRunner | null = null;
 let config: CiraConfig;
 let configPath: string | undefined;
 let isShuttingDown = false;
@@ -57,6 +63,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
     if (statsCollector) {
       logger.debug('Stopping stats collector...');
       statsCollector.stop();
+    }
+
+    // Close state store
+    if (stateStore) {
+      logger.debug('Closing state store...');
+      stateStore.close();
     }
 
     // Stop MODBUS server
@@ -288,12 +300,27 @@ async function main(): Promise<void> {
     setStatsCollector(statsCollector); // Wire stats collector for /api/rules/results
     logger.info(`Rule engine initialized: ${rulesDir}`);
 
+    // Spec G: Initialize state store for composite rules
+    const stateDbPath = path.join(configDir, 'state.db');
+    stateStore = createStateStore(stateDbPath);
+    logger.info(`State store initialized: ${stateDbPath}`);
+
+    // Spec G: Initialize composite rule engine
+    compositeRuleEngine = createCompositeRuleEngine(stateStore);
+    logger.info('Composite rule engine initialized');
+
+    // Spec G: Initialize action runner with available channels
+    actionRunner = createActionRunner(mqttChannel, modbusServer);
+    logger.info('Action runner initialized');
+
     // TEMPORARY — Spec D replaces this
     // Inject rule engine into StatsCollector for poll-cycle evaluation.
     // When Spec D (Heartbeat Scheduler) is implemented, remove this line
     // and wire ruleEngine into the HeartbeatScheduler instead.
     if (statsCollector) {
       statsCollector.setRuleEngine(ruleEngine);
+      statsCollector.setCompositeRuleEngine(compositeRuleEngine);
+      statsCollector.setActionRunner(actionRunner);
     }
 
     // Register WebChat routes for agent chat (after statsCollector for real data)
@@ -303,6 +330,7 @@ async function main(): Promise<void> {
       statsCollector,
       alertsConfig: config.alerts,
       ruleEngine,
+      compositeRuleEngine,
     });
 
     // Initialize MODBUS server if enabled

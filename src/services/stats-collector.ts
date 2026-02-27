@@ -4,6 +4,8 @@ import { NodeManager } from '../nodes/manager.js';
 import { MqttChannel } from '../channels/mqtt.js';
 import { createLogger } from '../utils/logger.js';
 import { RuleEngine, RulePayload, RuleAction, RuleResult, SocketType } from './rule-engine.js';
+import { CompositeRuleEngine, CompositeRuleResult } from './composite-rule-engine.js';
+import { ActionRunner, ActionContext } from './action-runner.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -51,6 +53,11 @@ export class StatsCollector extends EventEmitter {
   // v3: Cache for rule results (used by /api/rules/results)
   private lastRuleResults: Map<string, RuleResult> | null = null;
   private lastRuleResultsAt: string = '';
+
+  // Spec G: Composite rule engine and action runner
+  private compositeRuleEngine: CompositeRuleEngine | null = null;
+  private actionRunner: ActionRunner | null = null;
+  private lastCompositeResults: Map<string, CompositeRuleResult> | null = null;
 
   constructor(
     nodeManager: NodeManager,
@@ -198,10 +205,23 @@ export class StatsCollector extends EventEmitter {
           this.lastRuleResults = results;
           this.lastRuleResultsAt = new Date().toISOString();
 
-          // Dispatch non-pass actions
+          // Dispatch non-pass actions for atomic rules
           for (const [ruleId, result] of results) {
             if (result.success && result.action && result.action.action !== 'pass') {
-              this.handleRuleAction(node.id, result.action);
+              this.handleRuleAction(node.id, ruleId, result.action, false);
+            }
+          }
+
+          // Spec G: Evaluate composite rules using atomic results
+          if (this.compositeRuleEngine) {
+            const compositeResults = await this.compositeRuleEngine.evaluateAll(results, payload);
+            this.lastCompositeResults = compositeResults;
+
+            // Execute triggered composite actions
+            for (const [compositeId, compositeResult] of compositeResults) {
+              if (compositeResult.success && compositeResult.triggered && compositeResult.action) {
+                this.handleRuleAction(node.id, compositeId, compositeResult.action, true);
+              }
             }
           }
         }
@@ -382,6 +402,68 @@ export class StatsCollector extends EventEmitter {
   }
 
   /**
+   * Set the composite rule engine for Spec G graph evaluation.
+   */
+  setCompositeRuleEngine(engine: CompositeRuleEngine): void {
+    this.compositeRuleEngine = engine;
+  }
+
+  /**
+   * Set the action runner for executing rule actions.
+   */
+  setActionRunner(runner: ActionRunner): void {
+    this.actionRunner = runner;
+  }
+
+  /**
+   * Get the composite rule engine for API access.
+   */
+  getCompositeRuleEngine(): CompositeRuleEngine | null {
+    return this.compositeRuleEngine;
+  }
+
+  /**
+   * Get cached composite rule results for /api/rules/composite/results.
+   */
+  getCompositeRuleResults(): {
+    evaluated_at: string;
+    results: Record<string, {
+      triggered: boolean;
+      action?: RuleAction;
+      node_results: Record<string, boolean>;
+      success: boolean;
+      error?: string;
+      execution_ms: number;
+    }>;
+  } {
+    if (!this.lastCompositeResults) {
+      return { evaluated_at: '', results: {} };
+    }
+
+    const out: Record<string, {
+      triggered: boolean;
+      action?: RuleAction;
+      node_results: Record<string, boolean>;
+      success: boolean;
+      error?: string;
+      execution_ms: number;
+    }> = {};
+
+    for (const [id, result] of this.lastCompositeResults) {
+      out[id] = {
+        triggered: result.triggered,
+        action: result.action,
+        node_results: Object.fromEntries(result.node_results),
+        success: result.success,
+        error: result.error,
+        execution_ms: result.execution_ms,
+      };
+    }
+
+    return { evaluated_at: this.lastRuleResultsAt, results: out };
+  }
+
+  /**
    * Build a RulePayload for the given node.
    * Used by js_query tool and rule evaluation.
    */
@@ -516,12 +598,28 @@ export class StatsCollector extends EventEmitter {
 
   /**
    * Handle a rule action by dispatching to appropriate channels.
+   * If ActionRunner is available, delegate to it for full action handling.
    */
-  private handleRuleAction(nodeId: string, action: RuleAction): void {
+  private handleRuleAction(nodeId: string, ruleId: string, action: RuleAction, isComposite: boolean): void {
+    // If ActionRunner is available, use it for full action handling
+    if (this.actionRunner) {
+      const context: ActionContext = {
+        ruleId,
+        ruleName: ruleId, // Could be looked up from rule engine if needed
+        nodeId,
+        isComposite,
+      };
+      this.actionRunner.execute(action, context).catch((err) => {
+        logger.error(`Action runner error: ${err}`);
+      });
+      return;
+    }
+
+    // Fallback: basic handling without ActionRunner
     switch (action.action) {
       case 'reject':
       case 'alert':
-        this.emit('rule-action', { nodeId, ...action });
+        this.emit('rule-action', { nodeId, ruleId, isComposite, ...action });
         logger.warn(`Rule action [${action.action}]: ${action.reason || action.message}`);
         break;
       case 'modbus_write':

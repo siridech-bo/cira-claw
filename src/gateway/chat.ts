@@ -5,6 +5,7 @@ import { ToolContext, HeartbeatScheduler, MemoryManager } from '../agent/tools.j
 import { NodeManager } from '../nodes/manager.js';
 import { StatsCollector } from '../services/stats-collector.js';
 import { RuleEngine } from '../services/rule-engine.js';
+import { CompositeRuleEngine } from '../services/composite-rule-engine.js';
 import { AlertsConfig } from '../utils/config-schema.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -33,6 +34,8 @@ export interface ChatDependencies {
   statsCollector?: StatsCollector;
   alertsConfig?: AlertsConfig;
   ruleEngine?: RuleEngine;
+  // Spec G: Composite rule engine
+  compositeRuleEngine?: CompositeRuleEngine;
   // Spec D stub — Heartbeat Scheduler (not yet implemented)
   heartbeatScheduler?: HeartbeatScheduler;
   // Spec E stub — Memory Manager (not yet implemented)
@@ -46,6 +49,7 @@ export class ChatHandler {
   private statsCollector?: StatsCollector;
   private alertsConfig?: AlertsConfig;
   private ruleEngine?: RuleEngine;
+  private compositeRuleEngine?: CompositeRuleEngine;
   private conversationHistory: Map<WebSocket, AgentMessage[]> = new Map();
 
   constructor(deps: ChatDependencies) {
@@ -54,6 +58,7 @@ export class ChatHandler {
     this.statsCollector = deps.statsCollector;
     this.alertsConfig = deps.alertsConfig;
     this.ruleEngine = deps.ruleEngine;
+    this.compositeRuleEngine = deps.compositeRuleEngine;
   }
 
   handleConnection(socket: WebSocket): void {
@@ -140,6 +145,7 @@ export class ChatHandler {
             statsCollector: this.statsCollector as unknown as ToolContext['statsCollector'],
             alertsConfig: this.alertsConfig,
             ruleEngine: this.ruleEngine,
+            compositeRuleEngine: this.compositeRuleEngine,
           });
 
           // Add assistant response to history

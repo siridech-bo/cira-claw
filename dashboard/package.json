@@ -9,6 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "elkjs": "^0.11.0",
+    "rete": "^2.0.6",
+    "rete-area-plugin": "^2.1.5",
+    "rete-connection-plugin": "^2.0.5",
+    "rete-render-utils": "^2.0.3",
+    "rete-vue-plugin": "^2.1.2",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0"
   },

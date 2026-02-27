@@ -322,6 +322,21 @@ export class ModbusServer {
     if (index === undefined) return undefined;
     return index * REGISTERS_PER_NODE;
   }
+
+  /**
+   * Set a holding register value programmatically.
+   * Used by ActionRunner for rule-triggered MODBUS writes.
+   */
+  setHoldingRegister(address: number, value: number): void {
+    if (address < 0 || address >= this.registers.length) {
+      throw new Error(`Invalid register address: ${address}`);
+    }
+    if (value < 0 || value > 65535) {
+      throw new Error(`Invalid register value: ${value} (must be 0-65535)`);
+    }
+    this.registers[address] = value;
+    logger.debug(`Register ${address} set to ${value}`);
+  }
 }
 
 export function createModbusServer(

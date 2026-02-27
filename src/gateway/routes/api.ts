@@ -3,6 +3,7 @@ import { NodeManager } from '../../nodes/manager.js';
 import { NodeConfig, NodeConfigSchema } from '../../utils/config-schema.js';
 import { RuleEngine } from '../../services/rule-engine.js';
 import { StatsCollector } from '../../services/stats-collector.js';
+import { CompositeRule } from '../../services/state-store.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('api-routes');
@@ -790,6 +791,165 @@ export async function registerApiRoutes(
 
       logger.info(`Rule ${id} code updated via API`);
       return { success: true, id, rule: existingRule };
+    }
+  );
+
+  // =====================
+  // Composite Rules API (Spec G)
+  // =====================
+
+  // List all composite rules
+  fastify.get('/api/rules/composite', async (_request: FastifyRequest, reply: FastifyReply) => {
+    const compositeEngine = _statsCollector?.getCompositeRuleEngine();
+    if (!compositeEngine) {
+      return reply.status(503).send({
+        error: 'Composite rule engine not available',
+        message: 'Composite rule engine has not been initialized',
+      });
+    }
+
+    const stateStore = compositeEngine.getStateStore();
+    const rules = stateStore.getAllCompositeRules();
+    return { rules };
+  });
+
+  // Get composite rule evaluation results
+  fastify.get('/api/rules/composite/results', async (_request: FastifyRequest, _reply: FastifyReply) => {
+    if (!_statsCollector) {
+      return { evaluated_at: '', results: {} };
+    }
+    return _statsCollector.getCompositeRuleResults();
+  });
+
+  // Get single composite rule
+  fastify.get<{ Params: { id: string } }>(
+    '/api/rules/composite/:id',
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      const compositeEngine = _statsCollector?.getCompositeRuleEngine();
+      if (!compositeEngine) {
+        return reply.status(503).send({
+          error: 'Composite rule engine not available',
+        });
+      }
+
+      const { id } = request.params;
+      const stateStore = compositeEngine.getStateStore();
+      const rule = stateStore.getCompositeRule(id);
+
+      if (!rule) {
+        return reply.status(404).send({
+          error: 'Composite rule not found',
+          message: `Composite rule with id '${id}' does not exist`,
+        });
+      }
+
+      return rule;
+    }
+  );
+
+  // Create or update composite rule
+  fastify.put<{ Params: { id: string }; Body: Partial<CompositeRule> }>(
+    '/api/rules/composite/:id',
+    async (
+      request: FastifyRequest<{ Params: { id: string }; Body: Partial<CompositeRule> }>,
+      reply: FastifyReply
+    ) => {
+      const compositeEngine = _statsCollector?.getCompositeRuleEngine();
+      if (!compositeEngine) {
+        return reply.status(503).send({
+          error: 'Composite rule engine not available',
+        });
+      }
+
+      const { id } = request.params;
+      const body = request.body;
+      const stateStore = compositeEngine.getStateStore();
+
+      // Build the rule object
+      const existing = stateStore.getCompositeRule(id);
+      const rule: CompositeRule = {
+        id,
+        name: body.name || existing?.name || id,
+        description: body.description || existing?.description || '',
+        enabled: body.enabled ?? existing?.enabled ?? true,
+        created_at: existing?.created_at || new Date().toISOString(),
+        created_by: body.created_by || existing?.created_by || 'dashboard',
+        nodes: body.nodes || existing?.nodes || [],
+        connections: body.connections || existing?.connections || [],
+        output_action: body.output_action || existing?.output_action || { action: 'pass' },
+      };
+
+      // Validate
+      if (!rule.nodes || rule.nodes.length === 0) {
+        return reply.status(400).send({
+          error: 'Invalid composite rule',
+          message: 'Composite rule must have at least one node',
+        });
+      }
+
+      stateStore.saveCompositeRule(rule);
+      logger.info(`Composite rule ${id} saved via API`);
+
+      return { success: true, id, rule };
+    }
+  );
+
+  // Toggle composite rule enabled/disabled
+  fastify.post<{ Params: { id: string }; Body: { enabled: boolean } }>(
+    '/api/rules/composite/:id/toggle',
+    async (
+      request: FastifyRequest<{ Params: { id: string }; Body: { enabled: boolean } }>,
+      reply: FastifyReply
+    ) => {
+      const compositeEngine = _statsCollector?.getCompositeRuleEngine();
+      if (!compositeEngine) {
+        return reply.status(503).send({
+          error: 'Composite rule engine not available',
+        });
+      }
+
+      const { id } = request.params;
+      const { enabled } = request.body;
+      const stateStore = compositeEngine.getStateStore();
+
+      const success = stateStore.setCompositeRuleEnabled(id, enabled);
+
+      if (!success) {
+        return reply.status(404).send({
+          error: 'Composite rule not found',
+          message: `Composite rule with id '${id}' does not exist`,
+        });
+      }
+
+      logger.info(`Composite rule ${id} ${enabled ? 'enabled' : 'disabled'} via API`);
+      return { success: true, id, enabled };
+    }
+  );
+
+  // Delete composite rule
+  fastify.delete<{ Params: { id: string } }>(
+    '/api/rules/composite/:id',
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      const compositeEngine = _statsCollector?.getCompositeRuleEngine();
+      if (!compositeEngine) {
+        return reply.status(503).send({
+          error: 'Composite rule engine not available',
+        });
+      }
+
+      const { id } = request.params;
+      const stateStore = compositeEngine.getStateStore();
+      const success = stateStore.deleteCompositeRule(id);
+
+      if (!success) {
+        return reply.status(404).send({
+          error: 'Composite rule not found',
+          message: `Composite rule with id '${id}' does not exist`,
+        });
+      }
+
+      logger.info(`Composite rule ${id} deleted via API`);
+      return { success: true, id };
     }
   );
 
