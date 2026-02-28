@@ -1,20 +1,169 @@
 /**
- * useRuleEditor - Composable for managing composite rules in the Rule Graph editor
+ * useRuleEditor - Composable for managing composite rules with Rete.js editor
  *
  * Handles:
  * - Loading composite rules from API
  * - Saving composite rules to API
- * - Managing editor state
+ * - Managing Rete.js editor state
+ * - Node and connection operations
  */
 
-import { ref, computed, readonly } from 'vue';
+import { ref, computed, readonly, shallowRef, type Ref } from 'vue';
+import { NodeEditor, ClassicPreset } from 'rete';
+import { AreaPlugin, AreaExtensions } from 'rete-area-plugin';
+import { VuePlugin, Presets as VuePresets } from 'rete-vue-plugin';
+import { ConnectionPlugin, Presets as ConnectionPresets } from 'rete-connection-plugin';
+
+import {
+  RETE_SOCKETS,
+  BOOLEAN_ANY_SOCKET,
+  TIME_WINDOW_SOCKET,
+  CONTEXT_SOCKET,
+  isCompatible,
+  getSocketByName,
+} from './socketSetup';
+import type { SocketType } from '@gateway/socket-registry';
 import type {
   CompositeRule,
   CompositeNode,
   CompositeConnection,
   AtomicRule,
   OutputAction,
+  AtomicNodeData,
+  StatefulConditionNodeData,
 } from './types';
+
+// Import Vue node components
+import AtomicRuleNodeVue from '../components/rule-graph/AtomicRuleNodeVue.vue';
+import OperatorNodeVue from '../components/rule-graph/OperatorNodeVue.vue';
+import ActionNodeVue from '../components/rule-graph/ActionNodeVue.vue';
+import StatefulConditionNodeVue from '../components/rule-graph/StatefulConditionNodeVue.vue';
+import SocketVue from '../components/rule-graph/SocketVue.vue';
+
+// ─── Rete Node Data Classes ────────────────────────────────────────────────────
+// These are DATA classes — not Vue components.
+// They define the Rete graph structure and port types.
+// Vue components are assigned separately via customize.
+
+type Schemes = ClassicPreset.LabeledSchemes;
+
+export class AtomicRuleNode extends ClassicPreset.Node {
+  constructor(
+    public ruleId: string,
+    public ruleName: string,
+    public socketType: SocketType,
+    public reads: string[]
+  ) {
+    super(ruleName);
+    const socket = RETE_SOCKETS[socketType] ?? BOOLEAN_ANY_SOCKET;
+    this.addOutput('out', new ClassicPreset.Output(socket, 'Result'));
+  }
+}
+
+export class OperatorNode extends ClassicPreset.Node {
+  constructor(public operator: 'AND' | 'OR' | 'NOT') {
+    super(operator);
+    this.addInput('in1', new ClassicPreset.Input(BOOLEAN_ANY_SOCKET, 'A'));
+    if (operator !== 'NOT') {
+      this.addInput('in2', new ClassicPreset.Input(BOOLEAN_ANY_SOCKET, 'B'));
+    }
+    this.addOutput('out', new ClassicPreset.Output(BOOLEAN_ANY_SOCKET, 'Result'));
+  }
+}
+
+export class ActionNode extends ClassicPreset.Node {
+  constructor(public action: string, public config: Record<string, unknown> = {}) {
+    super(action.toUpperCase());
+    this.addInput('in', new ClassicPreset.Input(BOOLEAN_ANY_SOCKET, 'Execute'));
+  }
+}
+
+export class StatefulConditionNode extends ClassicPreset.Node {
+  constructor(
+    public config: {
+      condition: 'count_window' | 'consecutive' | 'rate' | 'sustained' | 'cooldown';
+      accepts_socket_type: SocketType;
+      count: number;
+      window_minutes: number;
+    }
+  ) {
+    super('Stateful Condition');
+    const inputSocket = RETE_SOCKETS[config.accepts_socket_type] ?? BOOLEAN_ANY_SOCKET;
+    this.addInput('in', new ClassicPreset.Input(inputSocket, config.accepts_socket_type));
+    this.addOutput('out', new ClassicPreset.Output(TIME_WINDOW_SOCKET, 'time.window'));
+  }
+}
+
+export class ConstantNode extends ClassicPreset.Node {
+  constructor(public value: boolean) {
+    super(value ? 'TRUE' : 'FALSE');
+    this.addOutput('out', new ClassicPreset.Output(BOOLEAN_ANY_SOCKET, 'Value'));
+  }
+}
+
+export class ThresholdNode extends ClassicPreset.Node {
+  constructor(
+    public field: string,
+    public operator: string,
+    public threshold: number
+  ) {
+    super(`${field} ${operator} ${threshold}`);
+    this.addOutput('out', new ClassicPreset.Output(BOOLEAN_ANY_SOCKET, 'Result'));
+  }
+}
+
+// ─── Rete Types ──────────────────────────────────────────────────────────────
+
+export type ReteArea = AreaPlugin<Schemes, any>;
+
+// ─── Editor factory ─────────────────────────────────────────────────────────────
+
+export async function createReteEditor(container: HTMLElement): Promise<{
+  editor: NodeEditor<Schemes>;
+  area: ReteArea;
+  destroy: () => void;
+}> {
+  const editor = new NodeEditor<Schemes>();
+  const area = new AreaPlugin<Schemes, any>(container);
+  const render = new VuePlugin<Schemes, any>();
+  const connection = new ConnectionPlugin<Schemes, any>();
+
+  // Socket compatibility enforcement
+  // This is the core of the spec — incompatible sockets snap back.
+  connection.addPreset(ConnectionPresets.classic.setup());
+
+  // Custom Vue renderers for nodes and sockets
+  render.addPreset(
+    VuePresets.classic.setup({
+      customize: {
+        node(context) {
+          if (context.payload instanceof AtomicRuleNode) return AtomicRuleNodeVue;
+          if (context.payload instanceof OperatorNode) return OperatorNodeVue;
+          if (context.payload instanceof ActionNode) return ActionNodeVue;
+          if (context.payload instanceof StatefulConditionNode) return StatefulConditionNodeVue;
+          return VuePresets.classic.Node;
+        },
+        socket() {
+          return SocketVue;
+        },
+      },
+    })
+  );
+
+  editor.use(area);
+  area.use(render);
+  area.use(connection);
+
+  // Set up zoom and node ordering
+  AreaExtensions.zoomAt(area, editor.getNodes());
+  AreaExtensions.simpleNodesOrder(area);
+
+  return {
+    editor,
+    area,
+    destroy: () => area.destroy(), // MUST be called in onUnmounted
+  };
+}
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +173,10 @@ const currentRuleId = ref<string | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const dirty = ref(false);
+
+// Rete editor refs
+const reteEditor = shallowRef<NodeEditor<Schemes> | null>(null);
+const reteArea = shallowRef<ReteArea | null>(null);
 
 // ─── Computed ────────────────────────────────────────────────────────────────
 
@@ -57,7 +210,7 @@ async function loadCompositeRules(): Promise<void> {
     loading.value = true;
     error.value = null;
 
-    const response = await fetch('/api/rules/composite');
+    const response = await fetch('/api/composite-rules');
     if (!response.ok) {
       throw new Error(`Failed to load composite rules: ${response.statusText}`);
     }
@@ -87,15 +240,20 @@ async function saveCompositeRule(rule: CompositeRule): Promise<void> {
     loading.value = true;
     error.value = null;
 
-    const response = await fetch(`/api/rules/composite/${rule.id}`, {
-      method: 'PUT',
+    // Check if this is a new rule or update
+    const existingRule = compositeRules.value.find(r => r.id === rule.id);
+    const method = existingRule ? 'PUT' : 'POST';
+    const url = existingRule ? `/api/composite-rules/${rule.id}` : '/api/composite-rules';
+
+    const response = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(rule),
     });
 
     if (!response.ok) {
       const data = await response.json();
-      throw new Error(data.message || `Failed to save rule: ${response.statusText}`);
+      throw new Error(data.message || data.error || `Failed to save rule: ${response.statusText}`);
     }
 
     // Update local state
@@ -120,7 +278,7 @@ async function deleteCompositeRule(id: string): Promise<void> {
     loading.value = true;
     error.value = null;
 
-    const response = await fetch(`/api/rules/composite/${id}`, {
+    const response = await fetch(`/api/composite-rules/${id}`, {
       method: 'DELETE',
     });
 
@@ -142,30 +300,12 @@ async function deleteCompositeRule(id: string): Promise<void> {
   }
 }
 
-async function toggleCompositeRule(id: string, enabled: boolean): Promise<void> {
-  try {
-    const response = await fetch(`/api/rules/composite/${id}/toggle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to toggle rule: ${response.statusText}`);
-    }
-
-    // Update local state
-    const rule = compositeRules.value.find(r => r.id === id);
-    if (rule) {
-      rule.enabled = enabled;
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to toggle rule';
-    throw err;
-  }
-}
-
 // ─── Editor Operations ───────────────────────────────────────────────────────
+
+function setReteEditor(editor: NodeEditor<Schemes> | null, area: ReteArea | null): void {
+  reteEditor.value = editor;
+  reteArea.value = area;
+}
 
 function selectRule(id: string | null): void {
   currentRuleId.value = id;
@@ -309,13 +449,17 @@ export function useRuleEditor() {
     error: readonly(error),
     dirty: readonly(dirty),
 
+    // Rete editor refs
+    reteEditor: readonly(reteEditor),
+    reteArea: readonly(reteArea),
+    setReteEditor,
+
     // API Operations
     loadAll,
     loadAtomicRules,
     loadCompositeRules,
     saveCompositeRule,
     deleteCompositeRule,
-    toggleCompositeRule,
 
     // Editor Operations
     selectRule,

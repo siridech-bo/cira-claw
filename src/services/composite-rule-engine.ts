@@ -3,8 +3,13 @@
  *
  * Evaluates composite rules by traversing the node graph and combining
  * atomic rule results through logic gates.
+ *
+ * Composite rules are stored as JSON files in ~/.cira/composite-rules/
  */
 
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { createLogger } from '../utils/logger.js';
 import {
   StateStore,
@@ -14,6 +19,7 @@ import {
   AtomicNodeData,
   ThresholdNodeData,
   OutputNodeData,
+  StatefulConditionNodeData,
 } from './state-store.js';
 import { RuleResult, RuleAction, RulePayload } from './rule-engine.js';
 import { SocketType } from './socket-registry.js';
@@ -37,10 +43,122 @@ export interface CompositeRuleResult {
 
 export class CompositeRuleEngine {
   private stateStore: StateStore;
+  private rulesDir: string;
 
-  constructor(stateStore: StateStore) {
+  constructor(stateStore: StateStore, rulesDir?: string) {
     this.stateStore = stateStore;
+    this.rulesDir = rulesDir || path.join(os.homedir(), '.cira', 'composite-rules');
+    this.ensureRulesDirectory();
   }
+
+  /**
+   * Ensure the rules directory exists.
+   */
+  private ensureRulesDirectory(): void {
+    if (!fs.existsSync(this.rulesDir)) {
+      fs.mkdirSync(this.rulesDir, { recursive: true });
+      logger.info(`Created composite rules directory: ${this.rulesDir}`);
+    }
+  }
+
+  // ─── File-Based Persistence ─────────────────────────────────────────────────
+
+  /**
+   * Load all composite rules from JSON files.
+   */
+  loadCompositeRules(): CompositeRule[] {
+    try {
+      const files = fs.readdirSync(this.rulesDir).filter(f => f.endsWith('.json'));
+      return files.flatMap(f => {
+        try {
+          const content = fs.readFileSync(path.join(this.rulesDir, f), 'utf-8');
+          return [JSON.parse(content) as CompositeRule];
+        } catch (err) {
+          logger.warn({ file: f, err }, 'Failed to parse composite rule file, skipping');
+          return [];
+        }
+      });
+    } catch (err) {
+      logger.warn({ err }, 'Failed to read composite rules directory');
+      return [];
+    }
+  }
+
+  /**
+   * Get all composite rules, optionally filtering by enabled status.
+   */
+  getAllCompositeRules(enabledOnly = false): CompositeRule[] {
+    const rules = this.loadCompositeRules();
+    if (enabledOnly) {
+      return rules.filter(r => r.enabled);
+    }
+    return rules;
+  }
+
+  /**
+   * Get a single composite rule by ID.
+   */
+  getCompositeRule(id: string): CompositeRule | null {
+    const filePath = path.join(this.rulesDir, `${id}.json`);
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(content) as CompositeRule;
+    } catch (err) {
+      logger.warn({ id, err }, 'Failed to read composite rule');
+      return null;
+    }
+  }
+
+  /**
+   * Save a composite rule to a JSON file.
+   * Validates the graph before saving.
+   */
+  saveCompositeRule(rule: CompositeRule): void {
+    const validation = this.validateGraph(rule);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
+    const filePath = path.join(this.rulesDir, `${rule.id}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(rule, null, 2), 'utf-8');
+    logger.info({ ruleId: rule.id }, 'Composite rule saved');
+  }
+
+  /**
+   * Delete a composite rule by ID.
+   * @returns true if deleted, false if not found
+   */
+  deleteCompositeRule(id: string): boolean {
+    const filePath = path.join(this.rulesDir, `${id}.json`);
+    if (!fs.existsSync(filePath)) {
+      return false;
+    }
+
+    fs.unlinkSync(filePath);
+    logger.info({ ruleId: id }, 'Composite rule deleted');
+    return true;
+  }
+
+  /**
+   * Enable or disable a composite rule.
+   * @returns true if updated, false if not found
+   */
+  setCompositeRuleEnabled(id: string, enabled: boolean): boolean {
+    const rule = this.getCompositeRule(id);
+    if (!rule) {
+      return false;
+    }
+
+    rule.enabled = enabled;
+    this.saveCompositeRule(rule);
+    return true;
+  }
+
+  // ─── Evaluation ─────────────────────────────────────────────────────────────
 
   /**
    * Evaluate all enabled composite rules.
@@ -56,7 +174,7 @@ export class CompositeRuleEngine {
     const results = new Map<string, CompositeRuleResult>();
 
     // Load enabled composite rules
-    const composites = this.stateStore.getAllCompositeRules(true);
+    const composites = this.getAllCompositeRules(true);
 
     for (const composite of composites) {
       const result = this.evaluateComposite(composite, atomicResults, payload);
@@ -104,6 +222,7 @@ export class CompositeRuleEngine {
       for (const outputNode of outputNodes) {
         const result = this.evaluateNode(
           outputNode.id,
+          composite.id,
           composite.nodes,
           adjacency,
           atomicResults,
@@ -184,6 +303,7 @@ export class CompositeRuleEngine {
    */
   private evaluateNode(
     nodeId: string,
+    compositeId: string,
     nodes: CompositeNode[],
     adjacency: Map<string, Array<{ source_node: string; source_socket: string }>>,
     atomicResults: Map<string, RuleResult>,
@@ -237,6 +357,7 @@ export class CompositeRuleEngine {
         // Get all inputs
         const inputs = this.getInputValues(
           nodeId,
+          compositeId,
           'input',
           nodes,
           adjacency,
@@ -254,6 +375,7 @@ export class CompositeRuleEngine {
         // Get all inputs
         const inputs = this.getInputValues(
           nodeId,
+          compositeId,
           'input',
           nodes,
           adjacency,
@@ -271,6 +393,7 @@ export class CompositeRuleEngine {
         // Get single input
         const inputs = this.getInputValues(
           nodeId,
+          compositeId,
           'input',
           nodes,
           adjacency,
@@ -288,6 +411,7 @@ export class CompositeRuleEngine {
         // Output node evaluates its input
         const inputs = this.getInputValues(
           nodeId,
+          compositeId,
           'input',
           nodes,
           adjacency,
@@ -297,6 +421,21 @@ export class CompositeRuleEngine {
           visited
         );
         result = inputs.length > 0 && inputs.every(v => v);
+        break;
+      }
+
+      case 'stateful_condition': {
+        result = this.evaluateStatefulCondition(
+          nodeId,
+          compositeId,
+          node.data as StatefulConditionNodeData,
+          nodes,
+          adjacency,
+          atomicResults,
+          payload,
+          nodeResults,
+          visited
+        );
         break;
       }
 
@@ -314,6 +453,7 @@ export class CompositeRuleEngine {
    */
   private getInputValues(
     nodeId: string,
+    compositeId: string,
     socketName: string,
     nodes: CompositeNode[],
     adjacency: Map<string, Array<{ source_node: string; source_socket: string }>>,
@@ -328,6 +468,7 @@ export class CompositeRuleEngine {
     return sources.map(source =>
       this.evaluateNode(
         source.source_node,
+        compositeId,
         nodes,
         adjacency,
         atomicResults,
@@ -336,6 +477,130 @@ export class CompositeRuleEngine {
         new Set(visited) // Clone to allow multiple paths
       )
     );
+  }
+
+  /**
+   * Evaluate a stateful condition node.
+   * Manages persistent state across evaluations.
+   */
+  private evaluateStatefulCondition(
+    nodeId: string,
+    compositeId: string,
+    data: StatefulConditionNodeData,
+    nodes: CompositeNode[],
+    adjacency: Map<string, Array<{ source_node: string; source_socket: string }>>,
+    atomicResults: Map<string, RuleResult>,
+    payload: RulePayload,
+    nodeResults: Map<string, boolean>,
+    visited: Set<string>
+  ): boolean {
+    // Get input value from connected source
+    const inputs = this.getInputValues(
+      nodeId,
+      compositeId,
+      'in',
+      nodes,
+      adjacency,
+      atomicResults,
+      payload,
+      nodeResults,
+      visited
+    );
+    const inputValue = inputs.length > 0 ? inputs[0] : false;
+
+    // Load existing state
+    const existingState = this.stateStore.getState(nodeId, compositeId) || {
+      timestamps: [] as number[],
+      consecutiveCount: 0,
+      lastTriggerTime: 0,
+      sustainedStartTime: 0,
+    };
+
+    const now = Date.now();
+    const windowMs = data.window_minutes * 60 * 1000;
+    let result = false;
+
+    switch (data.condition) {
+      case 'count_window': {
+        // True if input has been true at least `count` times within window
+        const timestamps = (existingState.timestamps as number[]).filter(
+          (t: number) => now - t < windowMs
+        );
+        if (inputValue) {
+          timestamps.push(now);
+        }
+        result = timestamps.length >= data.count;
+        existingState.timestamps = timestamps;
+        break;
+      }
+
+      case 'consecutive': {
+        // True if input has been true for `count` consecutive evaluations
+        let consecutiveCount = existingState.consecutiveCount as number;
+        if (inputValue) {
+          consecutiveCount++;
+        } else {
+          consecutiveCount = 0;
+        }
+        result = consecutiveCount >= data.count;
+        existingState.consecutiveCount = consecutiveCount;
+        break;
+      }
+
+      case 'rate': {
+        // True if rate of true inputs exceeds threshold (count per window)
+        const timestamps = (existingState.timestamps as number[]).filter(
+          (t: number) => now - t < windowMs
+        );
+        if (inputValue) {
+          timestamps.push(now);
+        }
+        // Rate = count / window_minutes (per minute)
+        const ratePerMinute = timestamps.length / data.window_minutes;
+        result = ratePerMinute >= data.count;
+        existingState.timestamps = timestamps;
+        break;
+      }
+
+      case 'sustained': {
+        // True if input has been continuously true for at least window_minutes
+        let sustainedStartTime = existingState.sustainedStartTime as number;
+        if (inputValue) {
+          if (sustainedStartTime === 0) {
+            sustainedStartTime = now;
+          }
+          result = now - sustainedStartTime >= windowMs;
+        } else {
+          sustainedStartTime = 0;
+          result = false;
+        }
+        existingState.sustainedStartTime = sustainedStartTime;
+        break;
+      }
+
+      case 'cooldown': {
+        // After triggering, prevents re-triggering for window_minutes
+        const lastTriggerTime = existingState.lastTriggerTime as number;
+        const cooldownExpired = now - lastTriggerTime >= windowMs;
+
+        if (inputValue && cooldownExpired) {
+          result = true;
+          existingState.lastTriggerTime = now;
+        } else {
+          result = false;
+        }
+        break;
+      }
+
+      default:
+        logger.warn(`Unknown stateful condition: ${data.condition}`);
+        result = false;
+    }
+
+    // Save updated state
+    this.stateStore.setState(nodeId, compositeId, existingState, result);
+
+    return result;
   }
 
   /**
@@ -401,10 +666,104 @@ export class CompositeRuleEngine {
   getStateStore(): StateStore {
     return this.stateStore;
   }
+
+  /**
+   * Get the rules directory path.
+   */
+  getRulesDir(): string {
+    return this.rulesDir;
+  }
+
+  /**
+   * Validate a composite rule graph for cycles and structural issues.
+   * @returns { valid: boolean; error?: string }
+   */
+  validateGraph(rule: CompositeRule): { valid: boolean; error?: string } {
+    // Check for empty graph
+    if (!rule.nodes || rule.nodes.length === 0) {
+      return { valid: true }; // Empty graph is technically valid
+    }
+
+    // Build adjacency list for cycle detection (source -> targets)
+    const adjacency = new Map<string, string[]>();
+    for (const node of rule.nodes) {
+      adjacency.set(node.id, []);
+    }
+
+    for (const conn of rule.connections) {
+      if (!adjacency.has(conn.source_node)) {
+        adjacency.set(conn.source_node, []);
+      }
+      adjacency.get(conn.source_node)!.push(conn.target_node);
+    }
+
+    // DFS-based cycle detection
+    const WHITE = 0; // Unvisited
+    const GRAY = 1;  // Currently visiting (in recursion stack)
+    const BLACK = 2; // Finished visiting
+
+    const color = new Map<string, number>();
+    for (const node of rule.nodes) {
+      color.set(node.id, WHITE);
+    }
+
+    const hasCycle = (nodeId: string, path: string[]): string[] | null => {
+      color.set(nodeId, GRAY);
+      path.push(nodeId);
+
+      const neighbors = adjacency.get(nodeId) || [];
+      for (const neighbor of neighbors) {
+        if (color.get(neighbor) === GRAY) {
+          // Found a cycle - return the path
+          const cycleStart = path.indexOf(neighbor);
+          return path.slice(cycleStart).concat(neighbor);
+        }
+        if (color.get(neighbor) === WHITE) {
+          const cycle = hasCycle(neighbor, [...path]);
+          if (cycle) return cycle;
+        }
+      }
+
+      color.set(nodeId, BLACK);
+      return null;
+    };
+
+    // Check each unvisited node
+    for (const node of rule.nodes) {
+      if (color.get(node.id) === WHITE) {
+        const cycle = hasCycle(node.id, []);
+        if (cycle) {
+          return {
+            valid: false,
+            error: `Cycle detected: ${cycle.join(' → ')}`,
+          };
+        }
+      }
+    }
+
+    // Check that all connections reference valid nodes
+    const nodeIds = new Set(rule.nodes.map(n => n.id));
+    for (const conn of rule.connections) {
+      if (!nodeIds.has(conn.source_node)) {
+        return {
+          valid: false,
+          error: `Connection references non-existent source node: ${conn.source_node}`,
+        };
+      }
+      if (!nodeIds.has(conn.target_node)) {
+        return {
+          valid: false,
+          error: `Connection references non-existent target node: ${conn.target_node}`,
+        };
+      }
+    }
+
+    return { valid: true };
+  }
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
-export function createCompositeRuleEngine(stateStore: StateStore): CompositeRuleEngine {
-  return new CompositeRuleEngine(stateStore);
+export function createCompositeRuleEngine(stateStore: StateStore, rulesDir?: string): CompositeRuleEngine {
+  return new CompositeRuleEngine(stateStore, rulesDir);
 }

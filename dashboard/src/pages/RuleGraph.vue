@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import RuleGraphCanvas from '../components/rule-graph/RuleGraphCanvas.vue';
 import RuleGraphSidebar from '../components/rule-graph/RuleGraphSidebar.vue';
-import { useRuleEditor } from '../composables/useRuleEditor';
+import { useRuleEditor, createReteEditor } from '../composables/useRuleEditor';
 import { useRuleEvaluation } from '../composables/useRuleEvaluation';
 import type { CompositeNode, CompositeConnection } from '../composables/types';
 import type { NodeType } from '../composables/sockets';
@@ -28,6 +27,7 @@ const {
   removeConnection,
   generateNodeId,
   generateConnectionId,
+  setReteEditor,
 } = useRuleEditor();
 
 const { startPolling, stopPolling } = useRuleEvaluation();
@@ -39,14 +39,32 @@ const selectedNode = computed(() => {
   return currentRule.value.nodes.find(n => n.id === selectedNodeId.value) || null;
 });
 
+// Rete.js canvas ref
+const canvasRef = ref<HTMLElement | null>(null);
+let reteDestroy: (() => void) | null = null;
+
 // Lifecycle
 onMounted(async () => {
   await loadAll();
   startPolling(2000);
+
+  // Initialize Rete.js editor
+  if (canvasRef.value) {
+    try {
+      const { editor, area, destroy } = await createReteEditor(canvasRef.value);
+      setReteEditor(editor, area);
+      reteDestroy = destroy;
+    } catch (err) {
+      console.error('Failed to initialize Rete.js editor:', err);
+    }
+  }
 });
 
 onUnmounted(() => {
   stopPolling();
+  // MANDATORY — leaks memory if skipped
+  reteDestroy?.();
+  setReteEditor(null, null);
 });
 
 // Rule list operations
@@ -95,7 +113,7 @@ function onAddNode(type: NodeType, data?: unknown) {
 
   const node: CompositeNode = {
     id: generateNodeId(),
-    type,
+    type: type as CompositeNode['type'],
     position: { x: 100 + Math.random() * 200, y: 100 + Math.random() * 200 },
     data: (data || { gate_type: type }) as CompositeNode['data'],
   };
@@ -184,20 +202,9 @@ function onDeleteConnection(connectionId: string) {
         </div>
       </div>
 
-      <!-- Canvas -->
+      <!-- Rete.js Canvas -->
       <div class="canvas-container">
-        <RuleGraphCanvas
-          v-if="currentRule"
-          :nodes="currentRule.nodes"
-          :connections="currentRule.connections"
-          :atomic-rules="atomicRules"
-          :selected-node-id="selectedNodeId"
-          @select-node="onSelectNode"
-          @delete-node="onDeleteNode"
-          @move-node="onMoveNode"
-          @add-connection="onAddConnection"
-          @delete-connection="onDeleteConnection"
-        />
+        <div ref="canvasRef" class="rete-canvas" v-if="currentRule"></div>
         <div v-else class="no-rule-selected">
           <p>Select a composite rule from the list</p>
           <p>or create a new one</p>
@@ -385,6 +392,18 @@ function onDeleteConnection(connectionId: string) {
   flex: 1;
   display: flex;
   min-width: 0;
+  position: relative;
+}
+
+.rete-canvas {
+  width: 100%;
+  height: 100%;
+  background: #0F172A;
+  background-image:
+    linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+  border-radius: 8px;
 }
 
 .no-rule-selected {

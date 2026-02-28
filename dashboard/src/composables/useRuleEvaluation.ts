@@ -96,7 +96,7 @@ async function fetchAtomicResults(): Promise<void> {
 
 async function fetchCompositeResults(): Promise<void> {
   try {
-    const response = await fetch('/api/rules/composite/results');
+    const response = await fetch('/api/composite-rules/results');
     if (!response.ok) {
       throw new Error(`Failed to fetch composite results: ${response.statusText}`);
     }

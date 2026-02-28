@@ -17,6 +17,7 @@ export default defineConfig({
       // Proxy node management APIs to gateway (18790) which handles JSON fixing
       '/api/nodes': 'http://localhost:18790',
       '/api/rules': 'http://localhost:18790',
+      '/api/composite-rules': 'http://localhost:18790',
       '/api/status': 'http://localhost:18790',
       '/health': 'http://localhost:18790',
       // Proxy chat websocket to gateway

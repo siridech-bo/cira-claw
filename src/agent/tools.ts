@@ -365,55 +365,14 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'composite_rule_create',
-    description: 'Create a composite rule that combines multiple atomic rules via logic gates. The rule graph is edited visually in the Rule Graph dashboard page. This tool creates an empty composite rule skeleton that the operator can then configure in the UI.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: {
-          type: 'string',
-          description: 'Human-readable name for the composite rule',
-        },
-        description: {
-          type: 'string',
-          description: 'Description of what this composite rule does',
-        },
-        output_action: {
-          type: 'string',
-          enum: ['pass', 'reject', 'alert', 'log', 'modbus_write'],
-          description: 'Default action when composite triggers (can be overridden in output nodes)',
-        },
-      },
-      required: ['name', 'description'],
-    },
-  },
-  {
-    name: 'composite_rule_toggle',
-    description: 'Enable or disable a composite rule',
+    name: 'composite_rule_explain',
+    description: 'Fetch a composite rule\'s full structure so you can explain its logic in plain language to the operator. Use this when an operator asks what a composite rule does or how it works.',
     inputSchema: {
       type: 'object',
       properties: {
         rule_id: {
           type: 'string',
-          description: 'ID of the composite rule',
-        },
-        enabled: {
-          type: 'boolean',
-          description: 'Whether to enable (true) or disable (false) the rule',
-        },
-      },
-      required: ['rule_id', 'enabled'],
-    },
-  },
-  {
-    name: 'composite_rule_delete',
-    description: 'Delete a composite rule',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        rule_id: {
-          type: 'string',
-          description: 'ID of the composite rule to delete',
+          description: 'The ID of the composite rule to explain',
         },
       },
       required: ['rule_id'],
@@ -1267,12 +1226,11 @@ export async function executeToolCall(
         return { data: { error: 'Composite rule engine not available' } };
       }
 
-      const stateStore = context.compositeRuleEngine.getStateStore();
-      const rules = stateStore.getAllCompositeRules(enabledOnly);
+      const rules = context.compositeRuleEngine.getAllCompositeRules(enabledOnly);
 
       return {
         data: {
-          rules: rules.map(r => ({
+          rules: rules.map((r: import('../services/state-store.js').CompositeRule) => ({
             id: r.id,
             name: r.name,
             description: r.description,
@@ -1288,111 +1246,30 @@ export async function executeToolCall(
       };
     }
 
-    case 'composite_rule_create': {
-      const name = input.name as string;
-      const description = input.description as string;
-      const outputAction = (input.output_action as string) || 'alert';
-
-      if (!context?.compositeRuleEngine) {
-        return { data: { error: 'Composite rule engine not available' } };
-      }
-
-      const stateStore = context.compositeRuleEngine.getStateStore();
-      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-      // Check if rule with this ID already exists
-      const existing = stateStore.getCompositeRule(id);
-      if (existing) {
-        return {
-          data: {
-            success: false,
-            error: `Composite rule with id '${id}' already exists`,
-          },
-        };
-      }
-
-      const rule: CompositeRule = {
-        id,
-        name,
-        description,
-        enabled: false, // Start disabled until configured
-        created_at: new Date().toISOString(),
-        created_by: 'ai-agent',
-        nodes: [],
-        connections: [],
-        output_action: {
-          action: outputAction as OutputAction['action'],
-        },
-      };
-
-      stateStore.saveCompositeRule(rule);
-
-      return {
-        data: {
-          success: true,
-          rule_id: id,
-          name,
-          description,
-          message: `Composite rule '${name}' created. Configure it in the Rule Graph dashboard page.`,
-          dashboard_url: '/rule-graph',
-        },
-      };
-    }
-
-    case 'composite_rule_toggle': {
-      const ruleId = input.rule_id as string;
-      const enabled = input.enabled as boolean;
-
-      if (!context?.compositeRuleEngine) {
-        return { data: { error: 'Composite rule engine not available' } };
-      }
-
-      const stateStore = context.compositeRuleEngine.getStateStore();
-      const success = stateStore.setCompositeRuleEnabled(ruleId, enabled);
-
-      if (!success) {
-        return {
-          data: {
-            success: false,
-            error: `Composite rule '${ruleId}' not found`,
-          },
-        };
-      }
-
-      return {
-        data: {
-          success: true,
-          rule_id: ruleId,
-          enabled,
-          message: `Composite rule '${ruleId}' ${enabled ? 'enabled' : 'disabled'}`,
-        },
-      };
-    }
-
-    case 'composite_rule_delete': {
+    case 'composite_rule_explain': {
       const ruleId = input.rule_id as string;
 
       if (!context?.compositeRuleEngine) {
         return { data: { error: 'Composite rule engine not available' } };
       }
 
-      const stateStore = context.compositeRuleEngine.getStateStore();
-      const success = stateStore.deleteCompositeRule(ruleId);
+      const rule = context.compositeRuleEngine.getCompositeRule(ruleId);
 
-      if (!success) {
-        return {
-          data: {
-            success: false,
-            error: `Composite rule '${ruleId}' not found`,
-          },
-        };
+      if (!rule) {
+        return { data: { error: `Composite rule '${ruleId}' not found` } };
       }
 
       return {
         data: {
-          success: true,
-          rule_id: ruleId,
-          message: `Composite rule '${ruleId}' deleted`,
+          rule_json: rule,
+          node_count: rule.nodes.length,
+          connection_count: rule.connections.length,
+          socket_type_summary:
+            'Each node in the graph has typed sockets. ' +
+            'vision.detection nodes observe defect counts and labels. ' +
+            'signal.threshold nodes observe numeric stats like FPS. ' +
+            'AND/OR/NOT gates combine boolean signals. ' +
+            'Output Action nodes trigger the final action when conditions are met.',
         },
       };
     }

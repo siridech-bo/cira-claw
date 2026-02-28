@@ -1,19 +1,22 @@
 /**
- * State Store — SQLite persistence for Spec G composite rules
+ * State Store — SQLite persistence for Spec G stateful node state
  *
  * Uses better-sqlite3 for synchronous operations.
- * Stores composite rule definitions and Rete.js node positions.
+ * Stores ONLY stateful node state (node_state table).
+ * Composite rules are stored as JSON files in ~/.cira/composite-rules/
  */
 
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { createLogger } from '../utils/logger.js';
-import { SocketType, isValidSocketType } from './socket-registry.js';
+import { SocketType } from './socket-registry.js';
 
 const logger = createLogger('state-store');
 
 // ─── Composite Rule Types ────────────────────────────────────────────────────
+// These types are exported for use by composite-rule-engine and API routes.
+// Storage of CompositeRule is handled by CompositeRuleEngine (JSON files).
 
 /**
  * A composite rule connects multiple atomic rules via logic gates.
@@ -31,19 +34,23 @@ export interface CompositeRule {
   connections: CompositeConnection[]; // Edges between nodes
   // Output
   output_action: OutputAction;       // What happens when composite fires
+  // Optional Spec G v2 fields
+  evaluation_mode?: 'logical' | 'stateful';
+  max_depth?: number;
+  version?: string;
 }
 
 /**
  * A node in the composite rule graph.
- * Can be: atomic rule reference, logic gate, or constant.
+ * Can be: atomic rule reference, logic gate, constant, threshold, stateful condition, or output.
  */
 export interface CompositeNode {
   id: string;                        // Unique within this graph
-  type: 'atomic' | 'and' | 'or' | 'not' | 'constant' | 'threshold' | 'output';
+  type: 'atomic' | 'and' | 'or' | 'not' | 'constant' | 'threshold' | 'output' | 'stateful_condition';
   // Position for Rete.js rendering
   position: { x: number; y: number };
   // Type-specific data
-  data: AtomicNodeData | GateNodeData | ConstantNodeData | ThresholdNodeData | OutputNodeData;
+  data: AtomicNodeData | GateNodeData | ConstantNodeData | ThresholdNodeData | OutputNodeData | StatefulConditionNodeData;
 }
 
 export interface AtomicNodeData {
@@ -76,6 +83,13 @@ export interface OutputNodeData {
   value?: number;
 }
 
+export interface StatefulConditionNodeData {
+  condition: 'count_window' | 'consecutive' | 'rate' | 'sustained' | 'cooldown';
+  accepts_socket_type: SocketType;
+  count: number;
+  window_minutes: number;
+}
+
 /**
  * A connection between two nodes.
  */
@@ -99,6 +113,8 @@ export interface OutputAction {
 }
 
 // ─── State Store Class ───────────────────────────────────────────────────────
+// ONLY handles node_state table for stateful condition nodes.
+// Composite rules are stored as JSON files by CompositeRuleEngine.
 
 export class StateStore {
   private db: Database.Database;
@@ -123,159 +139,85 @@ export class StateStore {
     // Enable WAL mode for better concurrent access
     this.db.pragma('journal_mode = WAL');
 
-    // Create composite_rules table
+    // Create node_state table for stateful condition nodes
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS composite_rules (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT DEFAULT '',
-        enabled INTEGER DEFAULT 1,
-        created_at TEXT NOT NULL,
-        created_by TEXT DEFAULT 'manual',
-        nodes_json TEXT NOT NULL,
-        connections_json TEXT NOT NULL,
-        output_action_json TEXT NOT NULL
+      CREATE TABLE IF NOT EXISTS node_state (
+        node_id TEXT NOT NULL,
+        composite_rule_id TEXT NOT NULL,
+        state_json TEXT NOT NULL,
+        last_result INTEGER DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (node_id, composite_rule_id)
       )
-    `);
-
-    // Create index on enabled for faster filtering
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_composite_rules_enabled
-      ON composite_rules(enabled)
     `);
 
     logger.info(`State store initialized: ${this.dbPath}`);
   }
 
-  // ─── Composite Rule Operations ─────────────────────────────────────────────
+  // ─── Stateful Node State Operations ─────────────────────────────────────────
 
   /**
-   * Save a composite rule (insert or update).
+   * Get state for a specific node in a composite rule.
    */
-  saveCompositeRule(rule: CompositeRule): void {
+  getState(nodeId: string, compositeRuleId: string): Record<string, unknown> | null {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO composite_rules
-      (id, name, description, enabled, created_at, created_by, nodes_json, connections_json, output_action_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      SELECT state_json FROM node_state WHERE node_id = ? AND composite_rule_id = ?
     `);
-
-    stmt.run(
-      rule.id,
-      rule.name,
-      rule.description,
-      rule.enabled ? 1 : 0,
-      rule.created_at,
-      rule.created_by,
-      JSON.stringify(rule.nodes),
-      JSON.stringify(rule.connections),
-      JSON.stringify(rule.output_action)
-    );
-
-    logger.info(`Saved composite rule: ${rule.id}`);
-  }
-
-  /**
-   * Load a composite rule by ID.
-   */
-  getCompositeRule(id: string): CompositeRule | null {
-    const stmt = this.db.prepare(`
-      SELECT * FROM composite_rules WHERE id = ?
-    `);
-
-    const row = stmt.get(id) as CompositeRuleRow | undefined;
+    const row = stmt.get(nodeId, compositeRuleId) as { state_json: string } | undefined;
     if (!row) {
       return null;
     }
-
-    return this.rowToCompositeRule(row);
+    return JSON.parse(row.state_json) as Record<string, unknown>;
   }
 
   /**
-   * Load all composite rules.
-   * @param enabledOnly - If true, only return enabled rules
+   * Set state for a specific node in a composite rule.
    */
-  getAllCompositeRules(enabledOnly = false): CompositeRule[] {
-    let sql = 'SELECT * FROM composite_rules';
-    if (enabledOnly) {
-      sql += ' WHERE enabled = 1';
-    }
-    sql += ' ORDER BY created_at ASC';
-
-    const stmt = this.db.prepare(sql);
-    const rows = stmt.all() as CompositeRuleRow[];
-
-    return rows.map(row => this.rowToCompositeRule(row));
-  }
-
-  /**
-   * Delete a composite rule by ID.
-   * @returns true if deleted, false if not found
-   */
-  deleteCompositeRule(id: string): boolean {
+  setState(nodeId: string, compositeRuleId: string, state: Record<string, unknown>, lastResult: boolean): void {
     const stmt = this.db.prepare(`
-      DELETE FROM composite_rules WHERE id = ?
+      INSERT OR REPLACE INTO node_state (node_id, composite_rule_id, state_json, last_result, updated_at)
+      VALUES (?, ?, ?, ?, ?)
     `);
-
-    const result = stmt.run(id);
-    const deleted = result.changes > 0;
-
-    if (deleted) {
-      logger.info(`Deleted composite rule: ${id}`);
-    }
-
-    return deleted;
+    stmt.run(nodeId, compositeRuleId, JSON.stringify(state), lastResult ? 1 : 0, new Date().toISOString());
   }
 
   /**
-   * Enable or disable a composite rule.
-   * @returns true if updated, false if not found
+   * Clear state for a specific node.
    */
-  setCompositeRuleEnabled(id: string, enabled: boolean): boolean {
+  clearState(nodeId: string, compositeRuleId: string): void {
     const stmt = this.db.prepare(`
-      UPDATE composite_rules SET enabled = ? WHERE id = ?
+      DELETE FROM node_state WHERE node_id = ? AND composite_rule_id = ?
     `);
-
-    const result = stmt.run(enabled ? 1 : 0, id);
-    const updated = result.changes > 0;
-
-    if (updated) {
-      logger.info(`Composite rule ${id} ${enabled ? 'enabled' : 'disabled'}`);
-    }
-
-    return updated;
+    stmt.run(nodeId, compositeRuleId);
   }
 
   /**
-   * Update node positions for a composite rule (for Rete.js editor save).
+   * Get all states for a composite rule (for debugging/API).
    */
-  updateNodePositions(id: string, nodes: CompositeNode[]): boolean {
-    const existing = this.getCompositeRule(id);
-    if (!existing) {
-      return false;
-    }
+  getAllStates(compositeRuleId: string): Array<{ nodeId: string; state: Record<string, unknown>; lastResult: boolean }> {
+    const stmt = this.db.prepare(`
+      SELECT node_id, state_json, last_result FROM node_state WHERE composite_rule_id = ?
+    `);
+    const rows = stmt.all(compositeRuleId) as Array<{ node_id: string; state_json: string; last_result: number }>;
+    return rows.map(row => ({
+      nodeId: row.node_id,
+      state: JSON.parse(row.state_json) as Record<string, unknown>,
+      lastResult: row.last_result === 1,
+    }));
+  }
 
-    // Update positions only
-    existing.nodes = nodes;
-    this.saveCompositeRule(existing);
-
-    return true;
+  /**
+   * Clear all states for a composite rule (reset all stateful nodes).
+   */
+  clearAllStates(compositeRuleId: string): void {
+    const stmt = this.db.prepare(`
+      DELETE FROM node_state WHERE composite_rule_id = ?
+    `);
+    stmt.run(compositeRuleId);
+    logger.info(`Cleared all states for composite rule: ${compositeRuleId}`);
   }
 
   // ─── Utility ───────────────────────────────────────────────────────────────
-
-  private rowToCompositeRule(row: CompositeRuleRow): CompositeRule {
-    return {
-      id: row.id,
-      name: row.name,
-      description: row.description || '',
-      enabled: row.enabled === 1,
-      created_at: row.created_at,
-      created_by: row.created_by || 'manual',
-      nodes: JSON.parse(row.nodes_json) as CompositeNode[],
-      connections: JSON.parse(row.connections_json) as CompositeConnection[],
-      output_action: JSON.parse(row.output_action_json) as OutputAction,
-    };
-  }
 
   /**
    * Close the database connection.
@@ -291,19 +233,6 @@ export class StateStore {
   getDbPath(): string {
     return this.dbPath;
   }
-}
-
-// Internal type for database rows
-interface CompositeRuleRow {
-  id: string;
-  name: string;
-  description: string;
-  enabled: number;
-  created_at: string;
-  created_by: string;
-  nodes_json: string;
-  connections_json: string;
-  output_action_json: string;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
