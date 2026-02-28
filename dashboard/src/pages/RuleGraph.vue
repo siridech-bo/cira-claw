@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import RuleGraphSidebar from '../components/rule-graph/RuleGraphSidebar.vue';
 import { useRuleEditor, createReteEditor } from '../composables/useRuleEditor';
 import { useRuleEvaluation } from '../composables/useRuleEvaluation';
@@ -28,6 +28,7 @@ const {
   generateNodeId,
   generateConnectionId,
   setReteEditor,
+  syncRuleToEditor,
 } = useRuleEditor();
 
 const { startPolling, stopPolling } = useRuleEvaluation();
@@ -43,21 +44,68 @@ const selectedNode = computed(() => {
 const canvasRef = ref<HTMLElement | null>(null);
 let reteDestroy: (() => void) | null = null;
 
+// Initialize Rete editor when canvas becomes available
+async function initReteEditor() {
+  console.log('initReteEditor: starting...');
+
+  // Destroy previous editor if exists
+  if (reteDestroy) {
+    console.log('initReteEditor: destroying previous editor');
+    reteDestroy();
+    reteDestroy = null;
+    setReteEditor(null, null);
+  }
+
+  // Wait for DOM to update multiple ticks to ensure layout is complete
+  await nextTick();
+  await nextTick();
+
+  // Also wait for next animation frame to ensure rendering
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+
+  if (!canvasRef.value) {
+    console.error('initReteEditor: canvasRef is null after nextTick');
+    return;
+  }
+
+  const container = canvasRef.value;
+  console.log('initReteEditor: canvas container:', {
+    clientWidth: container.clientWidth,
+    clientHeight: container.clientHeight,
+    offsetWidth: container.offsetWidth,
+    offsetHeight: container.offsetHeight,
+  });
+
+  // Ensure container has dimensions
+  if (container.clientWidth === 0 || container.clientHeight === 0) {
+    console.warn('initReteEditor: canvas has 0 dimensions, waiting...');
+    await new Promise<void>(resolve => setTimeout(resolve, 100));
+  }
+
+  try {
+    const { editor, area, destroy } = await createReteEditor(container);
+    setReteEditor(editor, area);
+    reteDestroy = destroy;
+    console.log('initReteEditor: Rete.js editor initialized successfully');
+
+    // Sync existing nodes from the rule to the editor
+    await syncRuleToEditor();
+  } catch (err) {
+    console.error('initReteEditor: failed to initialize Rete.js editor:', err);
+  }
+}
+
+// Watch for rule selection to initialize editor
+watch(currentRule, async (newRule) => {
+  if (newRule) {
+    await initReteEditor();
+  }
+});
+
 // Lifecycle
 onMounted(async () => {
   await loadAll();
   startPolling(2000);
-
-  // Initialize Rete.js editor
-  if (canvasRef.value) {
-    try {
-      const { editor, area, destroy } = await createReteEditor(canvasRef.value);
-      setReteEditor(editor, area);
-      reteDestroy = destroy;
-    } catch (err) {
-      console.error('Failed to initialize Rete.js editor:', err);
-    }
-  }
 });
 
 onUnmounted(() => {
@@ -108,7 +156,7 @@ function onMoveNode(nodeId: string, x: number, y: number) {
   updateNode(nodeId, { position: { x, y } });
 }
 
-function onAddNode(type: NodeType, data?: unknown) {
+async function onAddNode(type: NodeType, data?: unknown) {
   if (!currentRule.value) return;
 
   const node: CompositeNode = {
@@ -118,7 +166,7 @@ function onAddNode(type: NodeType, data?: unknown) {
     data: (data || { gate_type: type }) as CompositeNode['data'],
   };
 
-  addNode(node);
+  await addNode(node);
 }
 
 function onUpdateNode(nodeId: string, updates: Partial<CompositeNode>) {
@@ -390,20 +438,134 @@ function onDeleteConnection(connectionId: string) {
 
 .canvas-container {
   flex: 1;
-  display: flex;
-  min-width: 0;
+  min-width: 400px;
+  min-height: 400px;
   position: relative;
 }
 
 .rete-canvas {
+  /* Fix: use flex: 1 to fill the flex container properly */
+  flex: 1;
   width: 100%;
   height: 100%;
+  min-width: 400px;
+  min-height: 400px;
   background: #0F172A;
   background-image:
     linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px),
     linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px);
   background-size: 20px 20px;
   border-radius: 8px;
+  /* CRITICAL: Rete.js area plugin requires these */
+  position: relative;
+  overflow: hidden;
+}
+
+/* Rete.js area plugin creates this structure */
+.rete-canvas :deep(.rete-area) {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* Rete.js node wrappers - target all divs created by area plugin */
+.rete-canvas :deep(> div) {
+  width: 100%;
+  height: 100%;
+}
+
+/* Node containers created by VuePlugin */
+.rete-canvas :deep(.node) {
+  position: absolute;
+  z-index: 10;
+}
+
+/* DEBUG: Make all direct children of area visible */
+.rete-canvas :deep(div[data-testid]) {
+  position: absolute;
+}
+
+/* Ensure nodes with transform are visible */
+.rete-canvas :deep([style*="transform"]) {
+  position: absolute;
+  z-index: 10;
+}
+
+/* ─── Rete.js Default Node Styling ─────────────────────────────────────────── */
+/* Style the default classic Node component to match our dark theme */
+
+.rete-canvas :deep(.node) {
+  background: #1e293b;
+  border: 2px solid #6366f1;
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 140px;
+  color: #e2e8f0;
+  font-family: inherit;
+}
+
+.rete-canvas :deep(.node .title) {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.rete-canvas :deep(.node .input),
+.rete-canvas :deep(.node .output) {
+  display: flex;
+  align-items: center;
+  margin: 4px 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.rete-canvas :deep(.node .input .input-title),
+.rete-canvas :deep(.node .output .output-title) {
+  margin: 0 6px;
+}
+
+/* Socket styling */
+.rete-canvas :deep(.node .socket) {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #6366f1;
+  border: 2px solid #0f172a;
+  cursor: crosshair;
+  transition: transform 0.15s ease;
+}
+
+.rete-canvas :deep(.node .socket:hover) {
+  transform: scale(1.3);
+}
+
+.rete-canvas :deep(.node .input .socket) {
+  margin-left: -20px;
+}
+
+.rete-canvas :deep(.node .output .socket) {
+  margin-right: -20px;
+}
+
+/* Connection line styling */
+.rete-canvas :deep(svg) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.rete-canvas :deep(svg path) {
+  stroke: #6366f1;
+  stroke-width: 3;
+  fill: none;
 }
 
 .no-rule-selected {
