@@ -422,14 +422,14 @@ function applyNodeChanges() {
 
 <style scoped>
 .rule-graph-sidebar {
-  width: 280px;
-  background: #1E293B;
-  border-radius: 8px;
-  padding: 16px;
+  width: 100%;
+  background: transparent;
+  padding: 8px 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .sidebar-section {

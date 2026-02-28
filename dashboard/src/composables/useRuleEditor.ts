@@ -144,11 +144,16 @@ export async function createReteEditor(container: HTMLElement): Promise<{
   connection.addPreset(ConnectionPresets.classic.setup());
 
   // Custom Vue renderers for nodes and sockets
-  // Using default Node component for now to ensure socket connections work.
-  // Custom node styling is done via CSS.
   render.addPreset(
     VuePresets.classic.setup({
       customize: {
+        node(context) {
+          if (context.payload instanceof AtomicRuleNode)        return AtomicRuleNodeVue;
+          if (context.payload instanceof OperatorNode)          return OperatorNodeVue;
+          if (context.payload instanceof ActionNode)            return ActionNodeVue;
+          if (context.payload instanceof StatefulConditionNode) return StatefulConditionNodeVue;
+          return VuePresets.classic.Node;
+        },
         socket() {
           return SocketVue;
         },
