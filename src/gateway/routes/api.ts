@@ -1,10 +1,41 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { NodeManager } from '../../nodes/manager.js';
 import { NodeConfig, NodeConfigSchema } from '../../utils/config-schema.js';
-import { RuleEngine } from '../../services/rule-engine.js';
+import { RuleEngine, SavedRule } from '../../services/rule-engine.js';
 import { StatsCollector } from '../../services/stats-collector.js';
 import { CompositeRule } from '../../services/state-store.js';
 import { createLogger } from '../../utils/logger.js';
+import { randomUUID } from 'crypto';
+
+// ─── Spec H: Bundle Types ─────────────────────────────────────────────────────
+
+interface BundledAtomicRule {
+  id: string;
+  name: string;
+  description: string;
+  socket_type: string;
+  reads: string[];
+  produces: string[];
+  enabled: boolean;
+  created_at: string;
+  created_by: string;
+  prompt?: string;
+  tags?: string[];
+  code: string;
+}
+
+interface CiraBundle {
+  bundle_format: string;
+  bundle_id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  exported_at: string;
+  exported_by: string;
+  cira_version: string;
+  atomic_rules: BundledAtomicRule[];
+  composite_rules: CompositeRule[];
+}
 
 const logger = createLogger('api-routes');
 
@@ -633,6 +664,52 @@ export async function registerApiRoutes(
     return { rules };
   });
 
+  // POST /api/rules — Create or replace an atomic rule (Spec H: required for bundle import)
+  fastify.post<{ Body: Partial<SavedRule> }>(
+    '/api/rules',
+    async (request: FastifyRequest<{ Body: Partial<SavedRule> }>, reply: FastifyReply) => {
+      if (!_ruleEngine) {
+        return reply.status(503).send({ error: 'Rule engine not available' });
+      }
+
+      const body = request.body;
+
+      if (!body.id || !body.code) {
+        return reply.status(400).send({
+          error: 'Invalid rule',
+          message: 'Rule must have id and code',
+        });
+      }
+
+      if (!/^[a-z0-9_-]+$/i.test(body.id)) {
+        return reply.status(400).send({
+          error: 'Invalid rule id',
+          message: 'Rule id must contain only letters, numbers, hyphens and underscores',
+        });
+      }
+
+      const rule: SavedRule = {
+        id: body.id,
+        name: body.name || body.id,
+        description: body.description || '',
+        socket_type: (body.socket_type as any) || 'any.boolean',
+        reads: body.reads || [],
+        produces: body.produces || [],
+        code: body.code,
+        enabled: body.enabled ?? false,
+        created_at: body.created_at || new Date().toISOString(),
+        created_by: body.created_by || 'import',
+        prompt: body.prompt,
+        tags: body.tags,
+      };
+
+      _ruleEngine.saveRule(rule);
+      logger.info(`Rule ${rule.id} saved via POST /api/rules`);
+
+      return reply.status(201).send({ success: true, id: rule.id, rule });
+    }
+  );
+
   // Get rule evaluation results (v3 API for Spec G)
   fastify.get('/api/rules/results', async (_request: FastifyRequest, _reply: FastifyReply) => {
     if (!_statsCollector) {
@@ -791,6 +868,215 @@ export async function registerApiRoutes(
 
       logger.info(`Rule ${id} code updated via API`);
       return { success: true, id, rule: existingRule };
+    }
+  );
+
+  // ─── Spec H: Bundle Export / Import ────────────────────────────────────────
+
+  // GET /api/export — Export rules as a self-contained .cira bundle
+  // Query params:
+  //   (none)                         → all atomic + all composite rules
+  //   ?mode=composite&id=<id>        → one composite + its atomic dependencies
+  //   ?mode=atomic                   → all atomic rules only, no composites
+  fastify.get<{ Querystring: { mode?: string; id?: string } }>(
+    '/api/export',
+    async (
+      request: FastifyRequest<{ Querystring: { mode?: string; id?: string } }>,
+      reply: FastifyReply
+    ) => {
+      if (!_ruleEngine) {
+        return reply.status(503).send({ error: 'Rule engine not available' });
+      }
+
+      const compositeEngine = _statsCollector?.getCompositeRuleEngine();
+      if (!compositeEngine) {
+        return reply.status(503).send({ error: 'Composite engine not available' });
+      }
+
+      const mode = request.query.mode || 'all';
+      const allAtomicRules = _ruleEngine.loadRules();
+      const allCompositeRules = compositeEngine.getAllCompositeRules();
+
+      let atomicToExport: SavedRule[] = [];
+      let compositeToExport: CompositeRule[] = [];
+
+      if (mode === 'composite' && request.query.id) {
+        const composite = compositeEngine.getCompositeRule(request.query.id);
+        if (!composite) {
+          return reply.status(404).send({ error: 'Composite rule not found' });
+        }
+        compositeToExport = [composite];
+
+        // Collect only the atomic rule IDs referenced by this composite
+        const referencedIds = new Set<string>(
+          composite.nodes
+            .filter(n => n.type === 'atomic')
+            .map(n => (n.data as { rule_id: string }).rule_id)
+            .filter(Boolean)
+        );
+        atomicToExport = allAtomicRules.filter(r => referencedIds.has(r.id));
+
+      } else if (mode === 'atomic') {
+        atomicToExport = allAtomicRules;
+        compositeToExport = [];
+
+      } else {
+        // default: export everything
+        atomicToExport = allAtomicRules;
+        compositeToExport = allCompositeRules;
+      }
+
+      const bundleName = compositeToExport.length === 1
+        ? compositeToExport[0].name
+        : `CiRA Rules Export — ${atomicToExport.length} atomic, ${compositeToExport.length} composite`;
+
+      const bundle: CiraBundle = {
+        bundle_format: 'cira-recipe/1.0',
+        bundle_id: randomUUID(),
+        name: bundleName,
+        description: compositeToExport.length === 1
+          ? compositeToExport[0].description
+          : `Exported from CiRA CLAW`,
+        tags: [],
+        exported_at: new Date().toISOString(),
+        exported_by: 'api',
+        cira_version: '1.0.0',
+        atomic_rules: atomicToExport.map(r => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          socket_type: r.socket_type,
+          reads: r.reads,
+          produces: r.produces,
+          enabled: r.enabled,
+          created_at: r.created_at,
+          created_by: r.created_by,
+          ...(r.prompt ? { prompt: r.prompt } : {}),
+          ...(r.tags?.length ? { tags: r.tags } : {}),
+          code: r.code,
+        })),
+        composite_rules: compositeToExport,
+      };
+
+      // Suggest filename for browser download
+      const safeName = bundleName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+      reply.header('Content-Disposition', `attachment; filename="${safeName}.cira"`);
+      reply.header('Content-Type', 'application/json');
+      return bundle;
+    }
+  );
+
+  // POST /api/import — Import a .cira bundle
+  // Body: { bundle: CiraBundle, mode: 'merge' | 'overwrite' }
+  //   merge (default): skip rules whose ID already exists
+  //   overwrite: replace rules whose ID already exists
+  // Imported rules are always set enabled: false regardless of bundle value.
+  fastify.post<{ Body: { bundle: CiraBundle; mode?: 'merge' | 'overwrite' } }>(
+    '/api/import',
+    async (
+      request: FastifyRequest<{ Body: { bundle: CiraBundle; mode?: 'merge' | 'overwrite' } }>,
+      reply: FastifyReply
+    ) => {
+      if (!_ruleEngine) {
+        return reply.status(503).send({ error: 'Rule engine not available' });
+      }
+
+      const compositeEngine = _statsCollector?.getCompositeRuleEngine();
+      if (!compositeEngine) {
+        return reply.status(503).send({ error: 'Composite engine not available' });
+      }
+
+      const { bundle, mode = 'merge' } = request.body;
+
+      if (!bundle || bundle.bundle_format !== 'cira-recipe/1.0') {
+        return reply.status(400).send({
+          error: 'Invalid bundle',
+          message: 'File is not a valid .cira bundle (bundle_format must be "cira-recipe/1.0")',
+        });
+      }
+
+      const result = {
+        atomic:    { imported: 0, skipped: 0, overwritten: 0 },
+        composite: { imported: 0, skipped: 0, overwritten: 0 },
+        errors: [] as string[],
+      };
+
+      // Import atomic rules
+      const existingAtomicIds = new Set(_ruleEngine.loadRules().map(r => r.id));
+
+      for (const bundledRule of (bundle.atomic_rules || [])) {
+        try {
+          if (!bundledRule.id || !bundledRule.code) {
+            result.errors.push(`Skipped invalid atomic rule: missing id or code`);
+            continue;
+          }
+
+          const exists = existingAtomicIds.has(bundledRule.id);
+
+          if (exists && mode === 'merge') {
+            result.atomic.skipped++;
+            continue;
+          }
+
+          _ruleEngine.saveRule({
+            id: bundledRule.id,
+            name: bundledRule.name || bundledRule.id,
+            description: bundledRule.description || '',
+            socket_type: (bundledRule.socket_type as any) || 'any.boolean',
+            reads: bundledRule.reads || [],
+            produces: (bundledRule.produces || []) as any,
+            code: bundledRule.code,
+            enabled: false, // always import disabled
+            created_at: bundledRule.created_at || new Date().toISOString(),
+            created_by: bundledRule.created_by || 'import',
+            prompt: bundledRule.prompt,
+            tags: bundledRule.tags,
+          });
+
+          exists ? result.atomic.overwritten++ : result.atomic.imported++;
+        } catch (err) {
+          result.errors.push(
+            `Atomic rule '${bundledRule.id}': ${err instanceof Error ? err.message : 'unknown error'}`
+          );
+        }
+      }
+
+      // Import composite rules
+      const existingCompositeIds = new Set(compositeEngine.getAllCompositeRules().map(r => r.id));
+
+      for (const composite of (bundle.composite_rules || [])) {
+        try {
+          if (!composite.id) {
+            result.errors.push(`Skipped invalid composite rule: missing id`);
+            continue;
+          }
+
+          const exists = existingCompositeIds.has(composite.id);
+
+          if (exists && mode === 'merge') {
+            result.composite.skipped++;
+            continue;
+          }
+
+          compositeEngine.saveCompositeRule({
+            ...composite,
+            enabled: false, // always import disabled
+          });
+
+          exists ? result.composite.overwritten++ : result.composite.imported++;
+        } catch (err) {
+          result.errors.push(
+            `Composite rule '${composite.id}': ${err instanceof Error ? err.message : 'unknown error'}`
+          );
+        }
+      }
+
+      logger.info(`Bundle import (${mode}): atomic ${JSON.stringify(result.atomic)}, composite ${JSON.stringify(result.composite)}`);
+
+      return {
+        success: result.errors.length === 0,
+        result,
+      };
     }
   );
 

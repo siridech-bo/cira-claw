@@ -43,14 +43,126 @@ const selectedNodeId = ref<string | null>(null);
 const panelOpen = ref(false);
 const atomicSearch = ref('');
 
+// ── Spec H: Export / Import ────────────────────────────────────────────────
+const importInputRef = ref<HTMLInputElement | null>(null);
+
+interface ImportPreviewRule {
+  id: string;
+  name: string;
+  exists: boolean;
+}
+
+interface ImportPreview {
+  bundle: Record<string, unknown>;
+  bundleName: string;
+  bundleDescription: string;
+  atomic: ImportPreviewRule[];
+  composite: ImportPreviewRule[];
+}
+
+const importPreview = ref<ImportPreview | null>(null);
+
+async function onExportCurrentRule() {
+  if (!currentRule.value) return;
+  try {
+    const response = await fetch(`/api/export?mode=composite&id=${encodeURIComponent(currentRule.value.id)}`);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      alert('Export failed: ' + (data.error || response.statusText));
+      return;
+    }
+    const blob = await response.blob();
+    const safeName = currentRule.value.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeName}.cira`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch {
+    alert('Export failed: network error');
+  }
+}
+
+async function onImportFileSelected(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+
+  // Reset so same file can be selected again
+  if (importInputRef.value) importInputRef.value.value = '';
+
+  let bundle: Record<string, unknown>;
+  try {
+    const text = await file.text();
+    bundle = JSON.parse(text);
+  } catch {
+    alert('Failed to read file — must be valid JSON.');
+    return;
+  }
+
+  if (bundle.bundle_format !== 'cira-recipe/1.0') {
+    alert('Invalid file — not a CiRA recipe bundle.\n(bundle_format must be "cira-recipe/1.0")');
+    return;
+  }
+
+  const existingAtomicIds = new Set(atomicRules.value.map((r: any) => r.id));
+  const existingCompositeIds = new Set(compositeRules.value.map((r: any) => r.id));
+
+  importPreview.value = {
+    bundle,
+    bundleName: (bundle.name as string) || 'Unnamed bundle',
+    bundleDescription: (bundle.description as string) || '',
+    atomic: ((bundle.atomic_rules as any[]) || []).map(r => ({
+      id: r.id,
+      name: r.name || r.id,
+      exists: existingAtomicIds.has(r.id),
+    })),
+    composite: ((bundle.composite_rules as any[]) || []).map(r => ({
+      id: r.id,
+      name: r.name || r.id,
+      exists: existingCompositeIds.has(r.id),
+    })),
+  };
+}
+
+async function onConfirmImport(mode: 'merge' | 'overwrite') {
+  if (!importPreview.value) return;
+
+  try {
+    const response = await fetch('/api/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bundle: importPreview.value.bundle, mode }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      alert('Import failed: ' + (data.message || data.error || response.statusText));
+      return;
+    }
+
+    const r = data.result;
+    const lines = [
+      `Import complete.`,
+      `Atomic rules:    ${r.atomic.imported} new · ${r.atomic.overwritten} overwritten · ${r.atomic.skipped} skipped`,
+      `Composite rules: ${r.composite.imported} new · ${r.composite.overwritten} overwritten · ${r.composite.skipped} skipped`,
+    ];
+    if (r.errors.length) lines.push(`\nErrors:\n${r.errors.join('\n')}`);
+    alert(lines.join('\n'));
+
+    importPreview.value = null;
+    await loadAll();
+  } catch {
+    alert('Import failed: network error');
+  }
+}
+
 // Save button status
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
 let saveStatusTimer: ReturnType<typeof setTimeout> | null = null;
-
-// Inline rule name editing
-const editingRuleName = ref(false);
-const ruleNameInput = ref('');
-const ruleNameInputRef = ref<HTMLInputElement | null>(null);
 
 // Filter atomic rules by search text
 const filteredAtomicRules = computed(() => {
@@ -425,37 +537,6 @@ function onUpdateRule(updates: { name?: string; description?: string; enabled?: 
   updateCurrentRule(updates);
 }
 
-// Inline rule name editing
-async function startEditingRuleName() {
-  if (!currentRule.value) return;
-  ruleNameInput.value = currentRule.value.name;
-  editingRuleName.value = true;
-  await nextTick();
-  ruleNameInputRef.value?.focus();
-  ruleNameInputRef.value?.select();
-}
-
-function confirmRuleName() {
-  if (ruleNameInput.value.trim()) {
-    onUpdateRule({ name: ruleNameInput.value.trim() });
-  }
-  editingRuleName.value = false;
-}
-
-function cancelEditingRuleName() {
-  editingRuleName.value = false;
-}
-
-function handleRuleNameKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    confirmRuleName();
-  } else if (e.key === 'Escape') {
-    e.preventDefault();
-    cancelEditingRuleName();
-  }
-}
-
 // Connection operations
 function onAddConnection(source: string, sourceSocket: string, target: string, targetSocket: string) {
   const connection: CompositeConnection = {
@@ -484,26 +565,18 @@ function onDeleteConnection(connectionId: string) {
         </button>
         <span class="rg-title">Rule Graph</span>
         <span class="rg-divider">·</span>
-        <template v-if="currentRule">
-          <input
-            v-if="editingRuleName"
-            ref="ruleNameInputRef"
-            v-model="ruleNameInput"
-            type="text"
-            class="rg-rule-name-input"
-            @blur="confirmRuleName"
-            @keydown="handleRuleNameKeydown"
-          />
-          <span
-            v-else
-            class="rg-rule-name rg-rule-name--editable"
-            @click="startEditingRuleName"
-            title="Click to rename"
-          >
-            {{ currentRule.name }}<span v-if="dirty" class="rg-dirty"> *</span>
-          </span>
-        </template>
-        <span v-else class="rg-no-rule">No rule selected</span>
+        <input
+          v-if="currentRule"
+          class="rg-rule-name-input"
+          :value="currentRule.name"
+          @input="onUpdateRule({ name: ($event.target as HTMLInputElement).value })"
+          @keydown.enter="($event.target as HTMLInputElement).blur()"
+          placeholder="Rule name"
+          title="Click to rename"
+          spellcheck="false"
+        />
+        <span v-if="currentRule && dirty" class="rg-dirty">*</span>
+        <span v-if="!currentRule" class="rg-no-rule">No rule selected</span>
         <!-- Enable/disable toggle -->
         <label v-if="currentRule" class="rg-toggle" :class="{ 'rg-toggle--on': currentRule.enabled }">
           <input
@@ -529,6 +602,31 @@ function onDeleteConnection(connectionId: string) {
         >
           ⊡ Fit
         </button>
+
+        <!-- Export current rule as .cira -->
+        <button
+          v-if="currentRule"
+          class="rg-btn rg-btn-ghost"
+          @click="onExportCurrentRule"
+          title="Export as .cira bundle"
+        >↓ Export</button>
+
+        <!-- Import .cira bundle -->
+        <button
+          class="rg-btn rg-btn-ghost"
+          @click="importInputRef?.click()"
+          title="Import .cira bundle"
+        >↑ Import</button>
+
+        <!-- Hidden file input for import -->
+        <input
+          ref="importInputRef"
+          type="file"
+          accept=".cira,application/json"
+          style="display:none"
+          @change="onImportFileSelected"
+        />
+
         <button
           v-if="currentRule"
           class="rg-btn rg-btn-ghost rg-btn-undo"
@@ -691,6 +789,82 @@ function onDeleteConnection(connectionId: string) {
       </div>
     </div>
 
+    <!-- ── Import Preview Modal ──────────────────────────────────────────── -->
+    <Transition name="modal-fade">
+      <div v-if="importPreview" class="rg-modal-backdrop" @click.self="importPreview = null">
+        <div class="rg-modal">
+
+          <div class="rg-modal-header">
+            <span class="rg-modal-title">Import Bundle</span>
+            <button class="rg-panel-close" @click="importPreview = null">×</button>
+          </div>
+
+          <div class="rg-modal-body">
+            <div class="rg-modal-bundle-name">{{ importPreview.bundleName }}</div>
+            <div v-if="importPreview.bundleDescription" class="rg-modal-bundle-desc">
+              {{ importPreview.bundleDescription }}
+            </div>
+
+            <div v-if="importPreview.atomic.length" class="rg-modal-section">
+              <div class="rg-modal-section-title">
+                ATOMIC RULES ({{ importPreview.atomic.length }})
+              </div>
+              <div
+                v-for="r in importPreview.atomic"
+                :key="r.id"
+                class="rg-modal-row"
+              >
+                <span class="rg-modal-status" :class="r.exists ? 'rg-status-warn' : 'rg-status-new'">
+                  {{ r.exists ? '⚠' : '✓' }}
+                </span>
+                <span class="rg-modal-row-name">{{ r.name }}</span>
+                <span class="rg-modal-row-hint">{{ r.exists ? 'exists' : 'new' }}</span>
+              </div>
+            </div>
+
+            <div v-if="importPreview.composite.length" class="rg-modal-section">
+              <div class="rg-modal-section-title">
+                COMPOSITE RULES ({{ importPreview.composite.length }})
+              </div>
+              <div
+                v-for="r in importPreview.composite"
+                :key="r.id"
+                class="rg-modal-row"
+              >
+                <span class="rg-modal-status" :class="r.exists ? 'rg-status-warn' : 'rg-status-new'">
+                  {{ r.exists ? '⚠' : '✓' }}
+                </span>
+                <span class="rg-modal-row-name">{{ r.name }}</span>
+                <span class="rg-modal-row-hint">{{ r.exists ? 'exists' : 'new' }}</span>
+              </div>
+            </div>
+
+            <div
+              v-if="!importPreview.atomic.length && !importPreview.composite.length"
+              class="rg-modal-empty"
+            >
+              Bundle contains no rules.
+            </div>
+
+            <div class="rg-modal-note">
+              Imported rules are always disabled. Enable them manually after reviewing.
+            </div>
+          </div>
+
+          <div class="rg-modal-footer">
+            <button class="rg-btn rg-btn-secondary" @click="importPreview = null">Cancel</button>
+            <button class="rg-btn rg-btn-secondary" @click="onConfirmImport('merge')">
+              Import — Skip existing
+            </button>
+            <button class="rg-btn rg-btn-primary" @click="onConfirmImport('overwrite')">
+              Import — Overwrite
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </Transition>
+
   </div>
 </template>
 
@@ -746,40 +920,22 @@ function onDeleteConnection(connectionId: string) {
 
 .rg-divider { color: #334155; flex-shrink: 0; }
 
-.rg-rule-name {
-  font-size: 13px;
-  color: #94A3B8;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 220px;
-}
-
-.rg-rule-name--editable {
-  cursor: pointer;
-  padding: 2px 6px;
-  margin: -2px -6px;
-  border-radius: 4px;
-  transition: background 0.15s, color 0.15s;
-}
-
-.rg-rule-name--editable:hover {
-  background: rgba(99, 102, 241, 0.15);
-  color: #E2E8F0;
-}
-
+/* ── Rule name inline edit ──────────────────────────────────────────────── */
 .rg-rule-name-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  color: #94A3B8;
   font-size: 13px;
-  color: #E2E8F0;
-  background: #1E293B;
-  border: 1px solid #6366F1;
-  border-radius: 4px;
-  padding: 2px 8px;
-  width: 200px;
+  font-family: inherit;
+  padding: 2px 6px;
+  width: 180px;
   max-width: 220px;
   outline: none;
-  font-family: inherit;
+  transition: border-color 0.15s, color 0.15s;
 }
+.rg-rule-name-input:hover  { border-bottom-color: #334155; }
+.rg-rule-name-input:focus  { border-bottom-color: #6366F1; color: #F1F5F9; }
 
 .rg-dirty { color: #F59E0B; }
 
@@ -1322,4 +1478,108 @@ function onDeleteConnection(connectionId: string) {
   opacity: 0;
   transform: translateX(16px);
 }
+
+/* ── Import Preview Modal ───────────────────────────────────────────────── */
+.rg-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rg-modal {
+  background: #0F172A;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  width: 480px;
+  max-width: 92vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+}
+.rg-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #1E293B;
+  flex-shrink: 0;
+}
+.rg-modal-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #F1F5F9;
+  letter-spacing: 0.02em;
+}
+.rg-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rg-modal-bundle-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #E2E8F0;
+}
+.rg-modal-bundle-desc {
+  font-size: 12px;
+  color: #64748B;
+  line-height: 1.5;
+}
+.rg-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rg-modal-section-title {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #334155;
+  margin-bottom: 4px;
+}
+.rg-modal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #0B1120;
+  border-radius: 6px;
+}
+.rg-modal-status  { font-size: 12px; flex-shrink: 0; }
+.rg-status-new    { color: #10B981; }
+.rg-status-warn   { color: #F59E0B; }
+.rg-modal-row-name {
+  font-size: 12px;
+  color: #CBD5E1;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rg-modal-row-hint { font-size: 10px; color: #475569; flex-shrink: 0; }
+.rg-modal-empty    { font-size: 12px; color: #475569; text-align: center; padding: 16px 0; }
+.rg-modal-note {
+  font-size: 11px;
+  color: #475569;
+  border-top: 1px solid #1E293B;
+  padding-top: 12px;
+}
+.rg-modal-footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid #1E293B;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.modal-fade-enter-active, .modal-fade-leave-active { transition: opacity 0.15s; }
+.modal-fade-enter-from,   .modal-fade-leave-to     { opacity: 0; }
 </style>
