@@ -457,10 +457,7 @@ function updateCurrentRule(updates: Partial<CompositeRule>): void {
 }
 
 async function addNode(node: CompositeNode): Promise<void> {
-  console.log('[addNode] Called with node:', node.type, node.id);
-
   if (!currentRuleId.value) {
-    console.warn('[addNode] No currentRuleId');
     return;
   }
 
@@ -468,11 +465,9 @@ async function addNode(node: CompositeNode): Promise<void> {
   if (rule) {
     rule.nodes.push(node);
     dirty.value = true;
-    console.log('[addNode] Added to Vue state. Total nodes:', rule.nodes.length);
 
     // Also add to Rete.js editor if available
     if (reteEditor.value && reteArea.value) {
-      console.log('[addNode] Rete editor available, adding to canvas');
       const editor = reteEditor.value;
       const area = reteArea.value;
 
@@ -481,45 +476,31 @@ async function addNode(node: CompositeNode): Promise<void> {
         if (reteNode) {
           // Add node to editor
           await editor.addNode(reteNode);
-          console.log('[addNode] Added to Rete editor. Total nodes in editor:', editor.getNodes().length);
-
-          // Verify node exists in editor
-          const nodeInEditor = editor.getNode(reteNode.id);
-          console.log('[addNode] Node retrieved from editor:', !!nodeInEditor, nodeInEditor?.id);
 
           // Position the node
           await area.translate(reteNode.id, { x: node.position.x, y: node.position.y });
-          console.log('[addNode] Positioned at:', node.position.x, node.position.y);
 
           // Force area to update the node view
           try {
             await area.update('node', reteNode.id);
-            console.log('[addNode] Area updated for node');
-          } catch (updateErr) {
-            console.warn('[addNode] Area update warning:', updateErr);
+          } catch {
+            // Ignore update warnings
           }
 
           // Zoom to show all nodes after a short delay
           setTimeout(async () => {
             if (reteArea.value && reteEditor.value) {
               const nodes = reteEditor.value.getNodes();
-              console.log('[addNode] Zooming to show', nodes.length, 'nodes');
               if (nodes.length > 0) {
                 await AreaExtensions.zoomAt(reteArea.value, nodes);
               }
             }
           }, 150);
-        } else {
-          console.warn('[addNode] createReteNode returned null for type:', node.type);
         }
-      } catch (err) {
-        console.error('[addNode] Error adding to Rete:', err);
+      } catch {
+        // Error adding to Rete editor
       }
-    } else {
-      console.warn('[addNode] Rete editor NOT available. reteEditor:', !!reteEditor.value, 'reteArea:', !!reteArea.value);
     }
-  } else {
-    console.warn('[addNode] Rule not found for id:', currentRuleId.value);
   }
 }
 
@@ -816,19 +797,12 @@ async function repairReteConnections(): Promise<void> {
  */
 async function syncRuleToEditor(): Promise<void> {
   if (!currentRule.value || !reteEditor.value || !reteArea.value) {
-    console.log('[syncRuleToEditor] Missing requirements:', {
-      hasRule: !!currentRule.value,
-      hasEditor: !!reteEditor.value,
-      hasArea: !!reteArea.value,
-    });
     return;
   }
 
   const rule = currentRule.value;
   const editor = reteEditor.value;
   const area = reteArea.value;
-
-  console.log('[syncRuleToEditor] Syncing rule:', rule.id, 'with', rule.nodes.length, 'nodes and', rule.connections.length, 'connections');
 
   // Suppress connection sync during initial load to prevent duplicates
   _suppressConnectionSync = true;
@@ -840,7 +814,6 @@ async function syncRuleToEditor(): Promise<void> {
       if (reteNode) {
         await editor.addNode(reteNode);
         await area.translate(reteNode.id, { x: node.position.x, y: node.position.y });
-        console.log('[syncRuleToEditor] Added node:', reteNode.id, 'at', node.position.x, node.position.y);
       }
     }
 
@@ -857,7 +830,6 @@ async function syncRuleToEditor(): Promise<void> {
           if (sourceOutput && targetInput) {
             const reteConnection = new ClassicPreset.Connection(sourceNode, conn.source_socket, targetNode, conn.target_socket);
             await editor.addConnection(reteConnection);
-            console.log('[syncRuleToEditor] Added connection:', conn.source_node, '->', conn.target_node);
           }
         }
       } catch {
@@ -867,7 +839,6 @@ async function syncRuleToEditor(): Promise<void> {
 
     // Zoom to fit all nodes after syncing - delay to ensure Vue has rendered the nodes
     const allNodes = editor.getNodes();
-    console.log('[syncRuleToEditor] Total nodes in editor after sync:', allNodes.length);
     if (allNodes.length > 0) {
       // Wait for Vue to render the node components before zooming
       // Use multiple delays to ensure DOM is fully ready
@@ -877,14 +848,12 @@ async function syncRuleToEditor(): Promise<void> {
       // Now zoom to fit all nodes
       try {
         await AreaExtensions.zoomAt(area, allNodes);
-        console.log('[syncRuleToEditor] First zoom attempt completed');
 
         // Second zoom attempt after another delay for reliability
         await new Promise<void>(resolve => setTimeout(resolve, 100));
         await AreaExtensions.zoomAt(area, allNodes);
-        console.log('[syncRuleToEditor] Zoomed to fit', allNodes.length, 'nodes');
-      } catch (zoomErr) {
-        console.warn('[syncRuleToEditor] Zoom error:', zoomErr);
+      } catch {
+        // Ignore zoom errors
       }
     }
   } finally {
@@ -943,17 +912,9 @@ async function zoomToFit(): Promise<void> {
     const x = (containerW / 2) - (contentCenterX * k);
     const y = (containerH / 2) - (contentCenterY * k);
 
-    // Find the transform element (Rete's inner container)
-    const transformEl = area.container.firstElementChild as HTMLElement;
-    if (transformEl) {
-      // Apply CSS transform directly
-      transformEl.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
-      transformEl.style.transformOrigin = '0 0';
-
-      // Update Rete's internal transform state to match
-      const transform = area.area.transform;
-      Object.assign(transform, { k, x, y });
-    }
+    // Use Rete's proper API for viewport transform
+    await area.area.zoom(k, 0, 0);
+    await area.area.translate(x, y);
   } catch (err) {
     console.error('[zoomToFit] Error:', err);
   }

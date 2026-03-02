@@ -33,7 +33,6 @@ const {
   generateConnectionId,
   setReteEditor,
   syncRuleToEditor,
-  repairReteConnections,
   zoomToFit,
   reteArea,
 } = useRuleEditor();
@@ -78,7 +77,6 @@ let _initializingEditor = false;
 function updateNodeSelectionVisual(oldId: string | null, newId: string | null): void {
   const area = reteArea.value;
   if (!area) {
-    console.warn('[Selection] Area not available');
     return;
   }
 
@@ -97,7 +95,6 @@ function updateNodeSelectionVisual(oldId: string | null, newId: string | null): 
   // Add selection to new node
   if (newId) {
     const newNodeView = area.nodeViews.get(newId);
-    console.log('[Selection] Looking for node:', newId, 'Found:', !!newNodeView);
 
     if (newNodeView?.element) {
       const el = newNodeView.element as HTMLElement;
@@ -107,7 +104,6 @@ function updateNodeSelectionVisual(oldId: string | null, newId: string | null): 
       el.style.outlineOffset = '3px';
       el.style.boxShadow = '0 0 20px 4px rgba(34, 211, 238, 0.6)';
       el.style.borderRadius = '12px';
-      console.log('[Selection] Applied to:', el.tagName, el.className);
     }
   }
 }
@@ -116,7 +112,6 @@ function updateNodeSelectionVisual(oldId: string | null, newId: string | null): 
 async function initReteEditor() {
   // Prevent double initialization
   if (_initializingEditor) {
-    console.log('[RuleGraph] Editor initialization already in progress, skipping');
     return;
   }
   _initializingEditor = true;
@@ -124,7 +119,6 @@ async function initReteEditor() {
   try {
     // Destroy previous editor if exists
     if (reteDestroy) {
-      console.log('[RuleGraph] Destroying previous editor');
       reteDestroy();
       reteDestroy = null;
       setReteEditor(null, null);
@@ -137,7 +131,6 @@ async function initReteEditor() {
     await new Promise<void>(resolve => setTimeout(resolve, 50));
 
     if (!canvasRef.value) {
-      console.warn('[RuleGraph] Canvas ref not available');
       return;
     }
 
@@ -150,11 +143,8 @@ async function initReteEditor() {
     }
 
     if (container.clientWidth === 0 || container.clientHeight === 0) {
-      console.warn('[RuleGraph] Canvas has zero dimensions:', container.clientWidth, container.clientHeight);
       return;
     }
-
-    console.log('[RuleGraph] Creating editor in container:', container.clientWidth, 'x', container.clientHeight);
 
     const { editor, area, destroy } = await createReteEditor(container);
     setReteEditor(editor, area);
@@ -186,7 +176,6 @@ async function initReteEditor() {
 
     // Sync existing nodes from the rule to the editor
     await syncRuleToEditor();
-    console.log('[RuleGraph] Editor initialized successfully. Nodes in editor:', editor.getNodes().length);
 
     // Additional delayed zoom to ensure all nodes are visible
     setTimeout(async () => {
@@ -273,8 +262,6 @@ async function onSaveRule() {
 
   try {
     await saveCompositeRule(currentRule.value);
-    // Repair Rete connections after save to ensure wires are rendered
-    await repairReteConnections();
     saveStatus.value = 'saved';
     // Reset to idle after 2 seconds
     saveStatusTimer = setTimeout(() => {
