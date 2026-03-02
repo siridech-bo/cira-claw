@@ -35,8 +35,6 @@ const emit = defineEmits<{
   (e: 'addNode', type: NodeType, data?: unknown): void;
   (e: 'updateNode', nodeId: string, updates: Partial<CompositeNode>): void;
   (e: 'updateRule', updates: Partial<CompositeRule>): void;
-  (e: 'save'): void;
-  (e: 'delete'): void;
 }>();
 
 // Add node panel
@@ -223,14 +221,6 @@ function applyNodeChanges() {
         </label>
       </div>
 
-      <div class="button-group">
-        <button class="btn-primary" :disabled="!dirty" @click="emit('save')">
-          Save Rule
-        </button>
-        <button class="btn-danger" @click="emit('delete')">
-          Delete
-        </button>
-      </div>
     </section>
 
     <!-- Add Node -->
@@ -508,45 +498,6 @@ function applyNodeChanges() {
   cursor: pointer;
   font-size: 0.875rem;
   color: #E2E8F0;
-}
-
-.button-group {
-  display: flex;
-  gap: 8px;
-}
-
-.btn-primary,
-.btn-danger,
-.btn-small {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.btn-primary {
-  background: #6366F1;
-  color: white;
-}
-
-.btn-primary:hover {
-  background: #4F46E5;
-}
-
-.btn-primary:disabled {
-  background: #475569;
-  cursor: not-allowed;
-}
-
-.btn-danger {
-  background: #DC2626;
-  color: white;
-}
-
-.btn-danger:hover {
-  background: #B91C1C;
 }
 
 .btn-small {

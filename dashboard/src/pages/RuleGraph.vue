@@ -33,6 +33,9 @@ const {
   generateConnectionId,
   setReteEditor,
   syncRuleToEditor,
+  repairReteConnections,
+  zoomToFit,
+  reteArea,
 } = useRuleEditor();
 
 const { startPolling, stopPolling } = useRuleEvaluation();
@@ -40,6 +43,15 @@ const { startPolling, stopPolling } = useRuleEvaluation();
 const selectedNodeId = ref<string | null>(null);
 const panelOpen = ref(false);
 const atomicSearch = ref('');
+
+// Save button status
+const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
+let saveStatusTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Inline rule name editing
+const editingRuleName = ref(false);
+const ruleNameInput = ref('');
+const ruleNameInputRef = ref<HTMLInputElement | null>(null);
 
 // Filter atomic rules by search text
 const filteredAtomicRules = computed(() => {
@@ -58,66 +70,137 @@ const selectedNode = computed(() => {
 const canvasRef = ref<HTMLElement | null>(null);
 let reteDestroy: (() => void) | null = null;
 
-// Initialize Rete editor when canvas becomes available
-async function initReteEditor() {
-  console.log('initReteEditor: starting...');
+// Guard against concurrent initialization
+let _initializingEditor = false;
 
-  // Destroy previous editor if exists
-  if (reteDestroy) {
-    console.log('initReteEditor: destroying previous editor');
-    reteDestroy();
-    reteDestroy = null;
-    setReteEditor(null, null);
-  }
-
-  // Wait for DOM to update
-  await nextTick();
-  await nextTick();
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-
-  if (!canvasRef.value) {
-    console.error('initReteEditor: canvasRef is null after nextTick');
+// Update visual selection state on node elements
+// Uses Rete's nodeViews API to get the actual DOM element (not DOM queries)
+function updateNodeSelectionVisual(oldId: string | null, newId: string | null): void {
+  const area = reteArea.value;
+  if (!area) {
+    console.warn('[Selection] Area not available');
     return;
   }
 
-  const container = canvasRef.value;
-
-  // Wait for container to have non-zero dimensions (up to 1 second)
-  for (let i = 0; i < 20; i++) {
-    if (container.clientWidth > 0 && container.clientHeight > 0) break;
-    console.log(`initReteEditor: waiting for dimensions... attempt ${i + 1}`);
-    await new Promise<void>(resolve => setTimeout(resolve, 50));
+  // Remove selection from old node
+  if (oldId) {
+    const oldNodeView = area.nodeViews.get(oldId);
+    if (oldNodeView?.element) {
+      const el = oldNodeView.element as HTMLElement;
+      el.classList.remove('rete-node-selected');
+      el.style.outline = '';
+      el.style.outlineOffset = '';
+      el.style.boxShadow = '';
+    }
   }
 
-  console.log('initReteEditor: canvas container:', {
-    clientWidth: container.clientWidth,
-    clientHeight: container.clientHeight,
-  });
+  // Add selection to new node
+  if (newId) {
+    const newNodeView = area.nodeViews.get(newId);
+    console.log('[Selection] Looking for node:', newId, 'Found:', !!newNodeView);
 
-  if (container.clientWidth === 0 || container.clientHeight === 0) {
-    console.error('initReteEditor: canvas still has 0 dimensions after waiting');
-    return;
-  }
-
-  try {
-    const { editor, area, destroy } = await createReteEditor(container);
-    setReteEditor(editor, area);
-    reteDestroy = destroy;
-    console.log('initReteEditor: Rete.js editor initialized successfully');
-
-    // Sync existing nodes from the rule to the editor
-    await syncRuleToEditor();
-  } catch (err) {
-    console.error('initReteEditor: failed to initialize Rete.js editor:', err);
+    if (newNodeView?.element) {
+      const el = newNodeView.element as HTMLElement;
+      el.classList.add('rete-node-selected');
+      // Set inline style for immediate visual feedback
+      el.style.outline = '3px solid #22D3EE';
+      el.style.outlineOffset = '3px';
+      el.style.boxShadow = '0 0 20px 4px rgba(34, 211, 238, 0.6)';
+      el.style.borderRadius = '12px';
+      console.log('[Selection] Applied to:', el.tagName, el.className);
+    }
   }
 }
 
-// Watch for rule selection to initialize editor
-watch(currentRule, async (newRule) => {
-  if (newRule) {
-    await initReteEditor();
+// Initialize Rete editor when canvas becomes available
+async function initReteEditor() {
+  // Prevent double initialization
+  if (_initializingEditor) {
+    console.log('[RuleGraph] Editor initialization already in progress, skipping');
+    return;
   }
-});
+  _initializingEditor = true;
+
+  try {
+    // Destroy previous editor if exists
+    if (reteDestroy) {
+      console.log('[RuleGraph] Destroying previous editor');
+      reteDestroy();
+      reteDestroy = null;
+      setReteEditor(null, null);
+    }
+
+    // Wait for DOM to update - more aggressive waiting
+    await nextTick();
+    await nextTick();
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
+
+    if (!canvasRef.value) {
+      console.warn('[RuleGraph] Canvas ref not available');
+      return;
+    }
+
+    const container = canvasRef.value;
+
+    // Wait for container to have non-zero dimensions (up to 2 seconds)
+    for (let i = 0; i < 40; i++) {
+      if (container.clientWidth > 0 && container.clientHeight > 0) break;
+      await new Promise<void>(resolve => setTimeout(resolve, 50));
+    }
+
+    if (container.clientWidth === 0 || container.clientHeight === 0) {
+      console.warn('[RuleGraph] Canvas has zero dimensions:', container.clientWidth, container.clientHeight);
+      return;
+    }
+
+    console.log('[RuleGraph] Creating editor in container:', container.clientWidth, 'x', container.clientHeight);
+
+    const { editor, area, destroy } = await createReteEditor(container);
+    setReteEditor(editor, area);
+    reteDestroy = destroy;
+
+    // Handle node selection when clicked
+    area.addPipe((context) => {
+      if (context.type === 'nodepicked') {
+        const newId = context.data.id;
+        // Update visual selection
+        updateNodeSelectionVisual(selectedNodeId.value, newId);
+        selectedNodeId.value = newId;
+      }
+      return context;
+    });
+
+    // Sync node positions back to Vue state when dragged
+    area.addPipe((context) => {
+      if (context.type === 'nodetranslated') {
+        updateNode(context.data.id, {
+          position: {
+            x: context.data.position.x,
+            y: context.data.position.y,
+          },
+        });
+      }
+      return context;
+    });
+
+    // Sync existing nodes from the rule to the editor
+    await syncRuleToEditor();
+    console.log('[RuleGraph] Editor initialized successfully. Nodes in editor:', editor.getNodes().length);
+
+    // Additional delayed zoom to ensure all nodes are visible
+    setTimeout(async () => {
+      await zoomToFit();
+    }, 300);
+  } catch (err) {
+    console.error('[RuleGraph] Editor initialization failed:', err);
+  } finally {
+    _initializingEditor = false;
+  }
+}
+
+// NOTE: Removed watch on currentRuleId to prevent double initialization.
+// Editor initialization is now explicitly called in onSelectRule, onCreateRule, and onMounted.
 
 // Lifecycle
 onMounted(async () => {
@@ -125,6 +208,12 @@ onMounted(async () => {
   startPolling(2000);
   // Add keyboard shortcuts
   window.addEventListener('keydown', handleKeyDown);
+
+  // If a rule was already selected (e.g., returning to this page), reinitialize the editor
+  if (currentRuleId.value) {
+    await nextTick();
+    await initReteEditor();
+  }
 });
 
 onUnmounted(() => {
@@ -134,6 +223,11 @@ onUnmounted(() => {
   // MANDATORY — leaks memory if skipped
   reteDestroy?.();
   setReteEditor(null, null);
+});
+
+// Watch for programmatic selection changes (e.g., clicking close button on sidebar)
+watch(selectedNodeId, (newId, oldId) => {
+  updateNodeSelectionVisual(oldId, newId);
 });
 
 // Rule list operations
@@ -146,14 +240,52 @@ async function onSelectRule(id: string) {
   await initReteEditor();
 }
 
-function onCreateRule() {
+// Select rule from panel and close panel after editor is ready
+async function onSelectRuleAndClosePanel(id: string) {
+  // Close panel first to ensure canvas has full width
+  panelOpen.value = false;
+  // Wait for panel to close and layout to settle
+  await nextTick();
+  await new Promise<void>(resolve => setTimeout(resolve, 100));
+  // Now select the rule and initialize editor
+  await onSelectRule(id);
+}
+
+async function onCreateRule() {
   createNewRule();
   selectedNodeId.value = null;
+  clearUndoStack();
+  // Initialize Rete editor for the new rule
+  await nextTick();
+  await initReteEditor();
 }
 
 async function onSaveRule() {
-  if (currentRule.value) {
+  if (!currentRule.value) return;
+
+  // Clear any pending status timer
+  if (saveStatusTimer) {
+    clearTimeout(saveStatusTimer);
+    saveStatusTimer = null;
+  }
+
+  saveStatus.value = 'saving';
+
+  try {
     await saveCompositeRule(currentRule.value);
+    // Repair Rete connections after save to ensure wires are rendered
+    await repairReteConnections();
+    saveStatus.value = 'saved';
+    // Reset to idle after 2 seconds
+    saveStatusTimer = setTimeout(() => {
+      saveStatus.value = 'idle';
+    }, 2000);
+  } catch {
+    saveStatus.value = 'error';
+    // Reset to idle after 3 seconds
+    saveStatusTimer = setTimeout(() => {
+      saveStatus.value = 'idle';
+    }, 3000);
   }
 }
 
@@ -194,6 +326,11 @@ async function onUndoDelete() {
 
 function onMoveNode(nodeId: string, x: number, y: number) {
   updateNode(nodeId, { position: { x, y } });
+}
+
+// Zoom to fit all nodes in view
+async function onZoomToFit() {
+  await zoomToFit();
 }
 
 // Keyboard shortcuts
@@ -301,6 +438,37 @@ function onUpdateRule(updates: { name?: string; description?: string; enabled?: 
   updateCurrentRule(updates);
 }
 
+// Inline rule name editing
+async function startEditingRuleName() {
+  if (!currentRule.value) return;
+  ruleNameInput.value = currentRule.value.name;
+  editingRuleName.value = true;
+  await nextTick();
+  ruleNameInputRef.value?.focus();
+  ruleNameInputRef.value?.select();
+}
+
+function confirmRuleName() {
+  if (ruleNameInput.value.trim()) {
+    onUpdateRule({ name: ruleNameInput.value.trim() });
+  }
+  editingRuleName.value = false;
+}
+
+function cancelEditingRuleName() {
+  editingRuleName.value = false;
+}
+
+function handleRuleNameKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    confirmRuleName();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    cancelEditingRuleName();
+  }
+}
+
 // Connection operations
 function onAddConnection(source: string, sourceSocket: string, target: string, targetSocket: string) {
   const connection: CompositeConnection = {
@@ -329,9 +497,25 @@ function onDeleteConnection(connectionId: string) {
         </button>
         <span class="rg-title">Rule Graph</span>
         <span class="rg-divider">·</span>
-        <span v-if="currentRule" class="rg-rule-name">
-          {{ currentRule.name }}<span v-if="dirty" class="rg-dirty"> *</span>
-        </span>
+        <template v-if="currentRule">
+          <input
+            v-if="editingRuleName"
+            ref="ruleNameInputRef"
+            v-model="ruleNameInput"
+            type="text"
+            class="rg-rule-name-input"
+            @blur="confirmRuleName"
+            @keydown="handleRuleNameKeydown"
+          />
+          <span
+            v-else
+            class="rg-rule-name rg-rule-name--editable"
+            @click="startEditingRuleName"
+            title="Click to rename"
+          >
+            {{ currentRule.name }}<span v-if="dirty" class="rg-dirty"> *</span>
+          </span>
+        </template>
         <span v-else class="rg-no-rule">No rule selected</span>
         <!-- Enable/disable toggle -->
         <label v-if="currentRule" class="rg-toggle" :class="{ 'rg-toggle--on': currentRule.enabled }">
@@ -352,6 +536,14 @@ function onDeleteConnection(connectionId: string) {
       <div class="rg-toolbar-right">
         <button
           v-if="currentRule"
+          class="rg-btn rg-btn-ghost"
+          @click="onZoomToFit"
+          title="Zoom to fit all nodes"
+        >
+          ⊡ Fit
+        </button>
+        <button
+          v-if="currentRule"
           class="rg-btn rg-btn-ghost rg-btn-undo"
           :disabled="!canUndo()"
           @click="onUndoDelete"
@@ -360,7 +552,21 @@ function onDeleteConnection(connectionId: string) {
           ↶ Undo
         </button>
         <button class="rg-btn rg-btn-secondary" @click="onCreateRule">+ New</button>
-        <button class="rg-btn rg-btn-primary" :disabled="!dirty" @click="onSaveRule">Save</button>
+        <button
+          class="rg-btn rg-btn-save"
+          :class="{
+            'rg-btn-save--saving': saveStatus === 'saving',
+            'rg-btn-save--saved': saveStatus === 'saved',
+            'rg-btn-save--error': saveStatus === 'error',
+          }"
+          :disabled="!dirty && saveStatus === 'idle'"
+          @click="onSaveRule"
+        >
+          <span v-if="saveStatus === 'saving'">Saving...</span>
+          <span v-else-if="saveStatus === 'saved'">Saved</span>
+          <span v-else-if="saveStatus === 'error'">Error</span>
+          <span v-else>Save</span>
+        </button>
         <button v-if="currentRule" class="rg-btn rg-btn-danger" @click="onDeleteRule">Delete</button>
       </div>
     </div>
@@ -393,7 +599,7 @@ function onDeleteConnection(connectionId: string) {
             :key="rule.id"
             class="rg-rule-item"
             :class="{ 'rg-rule-item--active': rule.id === currentRuleId }"
-            @click="onSelectRule(rule.id); panelOpen = false"
+            @click="onSelectRuleAndClosePanel(rule.id)"
           >
             <div class="rg-rule-item-name">{{ rule.name }}</div>
             <div class="rg-rule-item-meta">
@@ -474,8 +680,6 @@ function onDeleteConnection(connectionId: string) {
           @add-node="onAddNode"
           @update-node="onUpdateNode"
           @update-rule="onUpdateRule"
-          @save="onSaveRule"
-          @delete="onDeleteRule"
         />
         <!-- Delete node button -->
         <div class="rg-node-actions">
@@ -562,6 +766,32 @@ function onDeleteConnection(connectionId: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 220px;
+}
+
+.rg-rule-name--editable {
+  cursor: pointer;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.rg-rule-name--editable:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: #E2E8F0;
+}
+
+.rg-rule-name-input {
+  font-size: 13px;
+  color: #E2E8F0;
+  background: #1E293B;
+  border: 1px solid #6366F1;
+  border-radius: 4px;
+  padding: 2px 8px;
+  width: 200px;
+  max-width: 220px;
+  outline: none;
+  font-family: inherit;
 }
 
 .rg-dirty { color: #F59E0B; }
@@ -668,6 +898,26 @@ function onDeleteConnection(connectionId: string) {
   color: #fff;
 }
 
+.rg-btn-save {
+  background: #6366F1;
+  color: #fff;
+  min-width: 72px;
+  transition: background 0.2s, opacity 0.15s;
+}
+
+.rg-btn-save--saving {
+  background: #818CF8;
+  cursor: wait;
+}
+
+.rg-btn-save--saved {
+  background: #10B981;
+}
+
+.rg-btn-save--error {
+  background: #EF4444;
+}
+
 .rg-btn-danger {
   background: transparent;
   color: #EF4444;
@@ -726,6 +976,14 @@ function onDeleteConnection(connectionId: string) {
 .rg-canvas :deep(> div) {
   width: 100%;
   height: 100%;
+}
+
+/* ─── Selected node highlight ─────────────────────────────────────────────── */
+.rg-canvas :deep(.rete-node-selected) {
+  outline: 3px solid #22D3EE !important;
+  outline-offset: 3px;
+  border-radius: 12px;
+  box-shadow: 0 0 20px 4px rgba(34, 211, 238, 0.5), 0 0 40px 8px rgba(34, 211, 238, 0.25) !important;
 }
 
 /* ─── Empty state ─────────────────────────────────────────────────────────── */

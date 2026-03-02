@@ -126,14 +126,6 @@ export async function createReteEditor(container: HTMLElement): Promise<{
   area: ReteArea;
   destroy: () => void;
 }> {
-  console.log('createReteEditor: initializing with container:', {
-    tagName: container.tagName,
-    clientWidth: container.clientWidth,
-    clientHeight: container.clientHeight,
-    offsetWidth: container.offsetWidth,
-    offsetHeight: container.offsetHeight,
-  });
-
   const editor = new NodeEditor<Schemes>();
   const area = new AreaPlugin<Schemes, any>(container);
   const render = new VuePlugin<Schemes, any>();
@@ -199,9 +191,11 @@ export async function createReteEditor(container: HTMLElement): Promise<{
   // ── Sync connection events to Vue state ──────────────────────────────
   // Listen for connection create/remove events and update the rule's connections array
   editor.addPipe((context) => {
+    // Skip sync when suppressed (e.g., during node removal)
+    if (_suppressConnectionSync) return context;
+
     if (context.type === 'connectioncreated') {
       const conn = context.data;
-      console.log('connectioncreated:', conn);
       // Add to Vue state
       if (currentRuleId.value) {
         const rule = compositeRules.value.find(r => r.id === currentRuleId.value);
@@ -223,7 +217,6 @@ export async function createReteEditor(container: HTMLElement): Promise<{
               target_socket: conn.targetInput,
             });
             dirty.value = true;
-            console.log('Connection added to Vue state, total:', rule.connections.length);
           }
         }
       }
@@ -231,7 +224,6 @@ export async function createReteEditor(container: HTMLElement): Promise<{
 
     if (context.type === 'connectionremoved') {
       const conn = context.data;
-      console.log('connectionremoved:', conn);
       // Remove from Vue state
       if (currentRuleId.value) {
         const rule = compositeRules.value.find(r => r.id === currentRuleId.value);
@@ -246,7 +238,6 @@ export async function createReteEditor(container: HTMLElement): Promise<{
           if (idx >= 0) {
             rule.connections.splice(idx, 1);
             dirty.value = true;
-            console.log('Connection removed from Vue state, total:', rule.connections.length);
           }
         }
       }
@@ -283,6 +274,12 @@ interface DeletedNodeEntry {
 }
 const undoStack = ref<DeletedNodeEntry[]>([]);
 const MAX_UNDO_STACK = 20;
+
+// Guard to suppress connection sync during node removal (prevents double-sync race)
+let _suppressConnectionSync = false;
+
+// Flag to track if data has been loaded (prevents reloading on navigation)
+let _dataLoaded = false;
 
 // ─── Computed ────────────────────────────────────────────────────────────────
 
@@ -330,15 +327,25 @@ async function loadCompositeRules(): Promise<void> {
   }
 }
 
-async function loadAll(): Promise<void> {
+async function loadAll(forceReload = false): Promise<void> {
+  // Skip loading if data already loaded (prevents losing local state on navigation)
+  if (_dataLoaded && !forceReload) {
+    return;
+  }
+
   loading.value = true;
   error.value = null;
 
   try {
     await Promise.all([loadAtomicRules(), loadCompositeRules()]);
+    _dataLoaded = true;
   } finally {
     loading.value = false;
   }
+}
+
+function isDataLoaded(): boolean {
+  return _dataLoaded;
 }
 
 async function saveCompositeRule(rule: CompositeRule): Promise<void> {
@@ -450,8 +457,10 @@ function updateCurrentRule(updates: Partial<CompositeRule>): void {
 }
 
 async function addNode(node: CompositeNode): Promise<void> {
+  console.log('[addNode] Called with node:', node.type, node.id);
+
   if (!currentRuleId.value) {
-    console.warn('addNode: no current rule selected');
+    console.warn('[addNode] No currentRuleId');
     return;
   }
 
@@ -459,57 +468,58 @@ async function addNode(node: CompositeNode): Promise<void> {
   if (rule) {
     rule.nodes.push(node);
     dirty.value = true;
-    console.log(`addNode: added node ${node.id} (type: ${node.type}) to rule state`);
+    console.log('[addNode] Added to Vue state. Total nodes:', rule.nodes.length);
 
     // Also add to Rete.js editor if available
     if (reteEditor.value && reteArea.value) {
+      console.log('[addNode] Rete editor available, adding to canvas');
+      const editor = reteEditor.value;
+      const area = reteArea.value;
+
       try {
         const reteNode = createReteNode(node);
         if (reteNode) {
-          console.log(`addNode: created Rete node:`, {
-            id: reteNode.id,
-            label: reteNode.label,
-            inputs: Object.keys(reteNode.inputs),
-            outputs: Object.keys(reteNode.outputs),
-          });
-          await reteEditor.value.addNode(reteNode);
-          console.log(`addNode: node added to editor, total nodes: ${reteEditor.value.getNodes().length}`);
-          // Position the node
-          await reteArea.value.translate(reteNode.id, { x: node.position.x, y: node.position.y });
-          console.log(`addNode: positioned node at (${node.position.x}, ${node.position.y})`);
+          // Add node to editor
+          await editor.addNode(reteNode);
+          console.log('[addNode] Added to Rete editor. Total nodes in editor:', editor.getNodes().length);
 
-          // DEBUG: Inspect DOM structure after adding node
+          // Verify node exists in editor
+          const nodeInEditor = editor.getNode(reteNode.id);
+          console.log('[addNode] Node retrieved from editor:', !!nodeInEditor, nodeInEditor?.id);
+
+          // Position the node
+          await area.translate(reteNode.id, { x: node.position.x, y: node.position.y });
+          console.log('[addNode] Positioned at:', node.position.x, node.position.y);
+
+          // Force area to update the node view
+          try {
+            await area.update('node', reteNode.id);
+            console.log('[addNode] Area updated for node');
+          } catch (updateErr) {
+            console.warn('[addNode] Area update warning:', updateErr);
+          }
+
+          // Zoom to show all nodes after a short delay
           setTimeout(async () => {
-            const areaContainer = (reteArea.value as any)?.container;
-            if (areaContainer) {
-              console.log('addNode: DOM inspection:', {
-                containerTagName: areaContainer.tagName,
-                childCount: areaContainer.children.length,
-                childTags: Array.from(areaContainer.children).map((c: any) => c.tagName),
-                firstChildInnerHTML: areaContainer.children[0]?.innerHTML?.substring(0, 200) || 'none',
-              });
-            }
-            // Try to zoom to show all nodes
             if (reteArea.value && reteEditor.value) {
               const nodes = reteEditor.value.getNodes();
+              console.log('[addNode] Zooming to show', nodes.length, 'nodes');
               if (nodes.length > 0) {
                 await AreaExtensions.zoomAt(reteArea.value, nodes);
-                console.log('addNode: zoomed to show nodes');
               }
             }
-          }, 100);
+          }, 150);
         } else {
-          console.warn(`addNode: createReteNode returned null for node type ${node.type}`);
+          console.warn('[addNode] createReteNode returned null for type:', node.type);
         }
       } catch (err) {
-        console.error('addNode: error adding node to Rete editor:', err);
+        console.error('[addNode] Error adding to Rete:', err);
       }
     } else {
-      console.warn('addNode: Rete editor not available', {
-        hasEditor: !!reteEditor.value,
-        hasArea: !!reteArea.value,
-      });
+      console.warn('[addNode] Rete editor NOT available. reteEditor:', !!reteEditor.value, 'reteArea:', !!reteArea.value);
     }
+  } else {
+    console.warn('[addNode] Rule not found for id:', currentRuleId.value);
   }
 }
 
@@ -561,7 +571,6 @@ function createReteNode(node: CompositeNode): AtomicRuleNode | OperatorNode | Ac
       break;
     }
     default:
-      console.warn(`Unknown node type: ${node.type}`);
       return null;
   }
 
@@ -620,8 +629,9 @@ async function removeNode(nodeId: string): Promise<void> {
     );
     dirty.value = true;
 
-    // Remove from Rete editor
+    // Remove from Rete editor (with sync suppression to prevent double-sync race)
     if (reteEditor.value) {
+      _suppressConnectionSync = true;
       try {
         // First remove all connections involving this node
         const reteConnections = reteEditor.value.getConnections();
@@ -632,9 +642,8 @@ async function removeNode(nodeId: string): Promise<void> {
         }
         // Then remove the node
         await reteEditor.value.removeNode(nodeId);
-        console.log(`removeNode: removed node ${nodeId} from Rete editor`);
-      } catch (err) {
-        console.error('removeNode: error removing from Rete editor:', err);
+      } finally {
+        _suppressConnectionSync = false;
       }
     }
   }
@@ -642,7 +651,6 @@ async function removeNode(nodeId: string): Promise<void> {
 
 async function undoDeleteNode(): Promise<CompositeNode | null> {
   if (undoStack.value.length === 0) {
-    console.log('undoDeleteNode: nothing to undo');
     return null;
   }
 
@@ -650,7 +658,6 @@ async function undoDeleteNode(): Promise<CompositeNode | null> {
 
   // Check if we're still on the same rule
   if (currentRuleId.value !== entry.ruleId) {
-    console.warn('undoDeleteNode: rule context changed, cannot undo');
     return null;
   }
 
@@ -670,7 +677,6 @@ async function undoDeleteNode(): Promise<CompositeNode | null> {
   }
 
   dirty.value = true;
-  console.log(`undoDeleteNode: restored node ${entry.node.id}`);
 
   // Add back to Rete editor
   if (reteEditor.value && reteArea.value) {
@@ -682,10 +688,9 @@ async function undoDeleteNode(): Promise<CompositeNode | null> {
           x: entry.node.position.x,
           y: entry.node.position.y,
         });
-        console.log(`undoDeleteNode: re-added node to Rete editor at (${entry.node.position.x}, ${entry.node.position.y})`);
       }
-    } catch (err) {
-      console.error('undoDeleteNode: error adding node to Rete editor:', err);
+    } catch {
+      // Error restoring node to Rete editor
     }
   }
 
@@ -756,81 +761,202 @@ function getAtomicRule(id: string): AtomicRule | undefined {
 }
 
 /**
- * Sync all nodes from the current rule to the Rete.js editor.
- * Call this after initializing the editor when a rule is selected.
+ * Verify and repair Rete connections to match Vue state.
+ * Call this after operations that might desync Rete from Vue.
  */
-async function syncRuleToEditor(): Promise<void> {
-  if (!currentRule.value) {
-    console.log('syncRuleToEditor: no current rule');
-    return;
-  }
-  if (!reteEditor.value) {
-    console.log('syncRuleToEditor: no Rete editor');
-    return;
-  }
-  if (!reteArea.value) {
-    console.log('syncRuleToEditor: no Rete area');
+async function repairReteConnections(): Promise<void> {
+  if (!currentRule.value || !reteEditor.value) {
     return;
   }
 
   const rule = currentRule.value;
-  console.log(`syncRuleToEditor: syncing ${rule.nodes.length} nodes and ${rule.connections.length} connections to Rete editor`);
+  const reteConnections = reteEditor.value.getConnections();
 
-  // Add all nodes to the editor
-  for (const node of rule.nodes) {
-    const reteNode = createReteNode(node);
-    if (reteNode) {
-      console.log(`syncRuleToEditor: adding node ${reteNode.id} (type: ${node.type})`);
-      await reteEditor.value.addNode(reteNode);
-      await reteArea.value.translate(reteNode.id, { x: node.position.x, y: node.position.y });
-    } else {
-      console.warn(`syncRuleToEditor: createReteNode returned null for node type ${node.type}`);
-    }
-  }
+  // Build a set of existing Rete connections for fast lookup
+  const reteConnSet = new Set(
+    reteConnections.map(c => `${c.source}:${c.sourceOutput}->${c.target}:${c.targetInput}`)
+  );
 
-  // Add all connections to the editor
-  for (const conn of rule.connections) {
-    try {
-      const sourceNode = reteEditor.value.getNode(conn.source_node);
-      const targetNode = reteEditor.value.getNode(conn.target_node);
+  // Suppress sync during repair
+  _suppressConnectionSync = true;
 
-      if (sourceNode && targetNode) {
-        const sourceOutput = sourceNode.outputs[conn.source_socket];
-        const targetInput = targetNode.inputs[conn.target_socket];
+  try {
+    // Add any missing connections
+    for (const conn of rule.connections) {
+      const connKey = `${conn.source_node}:${conn.source_socket}->${conn.target_node}:${conn.target_socket}`;
+      if (!reteConnSet.has(connKey)) {
+        // This connection is in Vue but not in Rete - add it
+        const sourceNode = reteEditor.value.getNode(conn.source_node);
+        const targetNode = reteEditor.value.getNode(conn.target_node);
 
-        if (sourceOutput && targetInput) {
-          const reteConnection = new ClassicPreset.Connection(sourceNode, conn.source_socket, targetNode, conn.target_socket);
-          await reteEditor.value.addConnection(reteConnection);
-          console.log(`syncRuleToEditor: added connection ${conn.source_node}:${conn.source_socket} -> ${conn.target_node}:${conn.target_socket}`);
-        } else {
-          console.warn(`syncRuleToEditor: missing socket for connection`, {
-            sourceSocket: conn.source_socket,
-            targetSocket: conn.target_socket,
-            availableOutputs: Object.keys(sourceNode.outputs),
-            availableInputs: Object.keys(targetNode.inputs),
-          });
+        if (sourceNode && targetNode) {
+          const sourceOutput = sourceNode.outputs[conn.source_socket];
+          const targetInput = targetNode.inputs[conn.target_socket];
+
+          if (sourceOutput && targetInput) {
+            const reteConnection = new ClassicPreset.Connection(
+              sourceNode,
+              conn.source_socket,
+              targetNode,
+              conn.target_socket
+            );
+            await reteEditor.value.addConnection(reteConnection);
+          }
         }
-      } else {
-        console.warn(`syncRuleToEditor: missing node for connection`, {
-          sourceNodeId: conn.source_node,
-          targetNodeId: conn.target_node,
-          sourceExists: !!sourceNode,
-          targetExists: !!targetNode,
-        });
       }
-    } catch (err) {
-      console.error('syncRuleToEditor: error adding connection:', err, conn);
     }
+  } finally {
+    _suppressConnectionSync = false;
+  }
+}
+
+/**
+ * Sync all nodes from the current rule to the Rete.js editor.
+ * Call this after initializing the editor when a rule is selected.
+ */
+async function syncRuleToEditor(): Promise<void> {
+  if (!currentRule.value || !reteEditor.value || !reteArea.value) {
+    console.log('[syncRuleToEditor] Missing requirements:', {
+      hasRule: !!currentRule.value,
+      hasEditor: !!reteEditor.value,
+      hasArea: !!reteArea.value,
+    });
+    return;
   }
 
-  // Zoom to fit all nodes after syncing
-  const allNodes = reteEditor.value.getNodes();
-  if (allNodes.length > 0) {
-    await AreaExtensions.zoomAt(reteArea.value, allNodes);
-    console.log(`syncRuleToEditor: zoomed to fit ${allNodes.length} nodes`);
+  const rule = currentRule.value;
+  const editor = reteEditor.value;
+  const area = reteArea.value;
+
+  console.log('[syncRuleToEditor] Syncing rule:', rule.id, 'with', rule.nodes.length, 'nodes and', rule.connections.length, 'connections');
+
+  // Suppress connection sync during initial load to prevent duplicates
+  _suppressConnectionSync = true;
+
+  try {
+    // Add all nodes to the editor
+    for (const node of rule.nodes) {
+      const reteNode = createReteNode(node);
+      if (reteNode) {
+        await editor.addNode(reteNode);
+        await area.translate(reteNode.id, { x: node.position.x, y: node.position.y });
+        console.log('[syncRuleToEditor] Added node:', reteNode.id, 'at', node.position.x, node.position.y);
+      }
+    }
+
+    // Add all connections to the editor
+    for (const conn of rule.connections) {
+      try {
+        const sourceNode = editor.getNode(conn.source_node);
+        const targetNode = editor.getNode(conn.target_node);
+
+        if (sourceNode && targetNode) {
+          const sourceOutput = sourceNode.outputs[conn.source_socket];
+          const targetInput = targetNode.inputs[conn.target_socket];
+
+          if (sourceOutput && targetInput) {
+            const reteConnection = new ClassicPreset.Connection(sourceNode, conn.source_socket, targetNode, conn.target_socket);
+            await editor.addConnection(reteConnection);
+            console.log('[syncRuleToEditor] Added connection:', conn.source_node, '->', conn.target_node);
+          }
+        }
+      } catch {
+        // Skip invalid connection
+      }
+    }
+
+    // Zoom to fit all nodes after syncing - delay to ensure Vue has rendered the nodes
+    const allNodes = editor.getNodes();
+    console.log('[syncRuleToEditor] Total nodes in editor after sync:', allNodes.length);
+    if (allNodes.length > 0) {
+      // Wait for Vue to render the node components before zooming
+      // Use multiple delays to ensure DOM is fully ready
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      await new Promise<void>(resolve => setTimeout(resolve, 200));
+
+      // Now zoom to fit all nodes
+      try {
+        await AreaExtensions.zoomAt(area, allNodes);
+        console.log('[syncRuleToEditor] First zoom attempt completed');
+
+        // Second zoom attempt after another delay for reliability
+        await new Promise<void>(resolve => setTimeout(resolve, 100));
+        await AreaExtensions.zoomAt(area, allNodes);
+        console.log('[syncRuleToEditor] Zoomed to fit', allNodes.length, 'nodes');
+      } catch (zoomErr) {
+        console.warn('[syncRuleToEditor] Zoom error:', zoomErr);
+      }
+    }
+  } finally {
+    _suppressConnectionSync = false;
+  }
+}
+
+/**
+ * Zoom to fit all nodes in the viewport.
+ * Sets CSS transform directly for reliable centering.
+ */
+async function zoomToFit(): Promise<void> {
+  if (!reteEditor.value || !reteArea.value) {
+    return;
   }
 
-  console.log('syncRuleToEditor: done');
+  const editor = reteEditor.value;
+  const area = reteArea.value;
+  const nodes = editor.getNodes();
+
+  if (nodes.length === 0) {
+    return;
+  }
+
+  try {
+    await new Promise<void>(resolve => setTimeout(resolve, 100));
+
+    // Calculate bounding box
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const node of nodes) {
+      const view = area.nodeViews.get(node.id);
+      if (!view) continue;
+
+      const el = view.element as HTMLElement | undefined;
+      const width = el?.offsetWidth || 180;
+      const height = el?.offsetHeight || 100;
+
+      minX = Math.min(minX, view.position.x);
+      minY = Math.min(minY, view.position.y);
+      maxX = Math.max(maxX, view.position.x + width);
+      maxY = Math.max(maxY, view.position.y + height);
+    }
+
+    if (!isFinite(minX)) return;
+
+    const containerW = area.container.clientWidth;
+    const containerH = area.container.clientHeight;
+    const padding = 60;
+    const contentW = maxX - minX + padding * 2;
+    const contentH = maxY - minY + padding * 2;
+
+    const k = Math.min(containerW / contentW, containerH / contentH, 1.0);
+    const contentCenterX = (minX + maxX) / 2;
+    const contentCenterY = (minY + maxY) / 2;
+    const x = (containerW / 2) - (contentCenterX * k);
+    const y = (containerH / 2) - (contentCenterY * k);
+
+    // Find the transform element (Rete's inner container)
+    const transformEl = area.container.firstElementChild as HTMLElement;
+    if (transformEl) {
+      // Apply CSS transform directly
+      transformEl.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
+      transformEl.style.transformOrigin = '0 0';
+
+      // Update Rete's internal transform state to match
+      const transform = area.area.transform;
+      Object.assign(transform, { k, x, y });
+    }
+  } catch (err) {
+    console.error('[zoomToFit] Error:', err);
+  }
 }
 
 // ─── Export ──────────────────────────────────────────────────────────────────
@@ -872,11 +998,14 @@ export function useRuleEditor() {
     addConnection,
     removeConnection,
     updateOutputAction,
+    zoomToFit,
 
     // Utility
     generateNodeId,
     generateConnectionId,
     getAtomicRule,
     syncRuleToEditor,
+    repairReteConnections,
+    isDataLoaded,
   };
 }
