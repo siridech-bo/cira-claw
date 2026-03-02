@@ -196,6 +196,65 @@ export async function createReteEditor(container: HTMLElement): Promise<{
   AreaExtensions.zoomAt(area, editor.getNodes());
   AreaExtensions.simpleNodesOrder(area);
 
+  // ── Sync connection events to Vue state ──────────────────────────────
+  // Listen for connection create/remove events and update the rule's connections array
+  editor.addPipe((context) => {
+    if (context.type === 'connectioncreated') {
+      const conn = context.data;
+      console.log('connectioncreated:', conn);
+      // Add to Vue state
+      if (currentRuleId.value) {
+        const rule = compositeRules.value.find(r => r.id === currentRuleId.value);
+        if (rule) {
+          // Check if connection already exists (avoid duplicates)
+          const exists = rule.connections.some(
+            c =>
+              c.source_node === conn.source &&
+              c.source_socket === conn.sourceOutput &&
+              c.target_node === conn.target &&
+              c.target_socket === conn.targetInput
+          );
+          if (!exists) {
+            rule.connections.push({
+              id: `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              source_node: conn.source,
+              source_socket: conn.sourceOutput,
+              target_node: conn.target,
+              target_socket: conn.targetInput,
+            });
+            dirty.value = true;
+            console.log('Connection added to Vue state, total:', rule.connections.length);
+          }
+        }
+      }
+    }
+
+    if (context.type === 'connectionremoved') {
+      const conn = context.data;
+      console.log('connectionremoved:', conn);
+      // Remove from Vue state
+      if (currentRuleId.value) {
+        const rule = compositeRules.value.find(r => r.id === currentRuleId.value);
+        if (rule) {
+          const idx = rule.connections.findIndex(
+            c =>
+              c.source_node === conn.source &&
+              c.source_socket === conn.sourceOutput &&
+              c.target_node === conn.target &&
+              c.target_socket === conn.targetInput
+          );
+          if (idx >= 0) {
+            rule.connections.splice(idx, 1);
+            dirty.value = true;
+            console.log('Connection removed from Vue state, total:', rule.connections.length);
+          }
+        }
+      }
+    }
+
+    return context;
+  });
+
   return {
     editor,
     area,
@@ -215,6 +274,15 @@ const dirty = ref(false);
 // Rete editor refs
 const reteEditor = shallowRef<NodeEditor<Schemes> | null>(null);
 const reteArea = shallowRef<ReteArea | null>(null);
+
+// Undo stack for deleted nodes (stores node + its connections)
+interface DeletedNodeEntry {
+  ruleId: string;
+  node: CompositeNode;
+  connections: CompositeConnection[];
+}
+const undoStack = ref<DeletedNodeEntry[]>([]);
+const MAX_UNDO_STACK = 20;
 
 // ─── Computed ────────────────────────────────────────────────────────────────
 
@@ -519,18 +587,117 @@ function updateNode(nodeId: string, updates: Partial<CompositeNode>): void {
   }
 }
 
-function removeNode(nodeId: string): void {
+async function removeNode(nodeId: string): Promise<void> {
   if (!currentRuleId.value) return;
 
   const rule = compositeRules.value.find(r => r.id === currentRuleId.value);
   if (rule) {
+    // Find the node to delete
+    const nodeToDelete = rule.nodes.find(n => n.id === nodeId);
+    if (!nodeToDelete) return;
+
+    // Find connections involving this node (for undo)
+    const connectionsToDelete = rule.connections.filter(
+      c => c.source_node === nodeId || c.target_node === nodeId
+    );
+
+    // Save to undo stack
+    undoStack.value.push({
+      ruleId: currentRuleId.value,
+      node: JSON.parse(JSON.stringify(nodeToDelete)), // Deep clone
+      connections: JSON.parse(JSON.stringify(connectionsToDelete)),
+    });
+
+    // Trim undo stack if too large
+    if (undoStack.value.length > MAX_UNDO_STACK) {
+      undoStack.value.shift();
+    }
+
+    // Remove from Vue state
     rule.nodes = rule.nodes.filter(n => n.id !== nodeId);
-    // Also remove connections involving this node
     rule.connections = rule.connections.filter(
       c => c.source_node !== nodeId && c.target_node !== nodeId
     );
     dirty.value = true;
+
+    // Remove from Rete editor
+    if (reteEditor.value) {
+      try {
+        // First remove all connections involving this node
+        const reteConnections = reteEditor.value.getConnections();
+        for (const conn of reteConnections) {
+          if (conn.source === nodeId || conn.target === nodeId) {
+            await reteEditor.value.removeConnection(conn.id);
+          }
+        }
+        // Then remove the node
+        await reteEditor.value.removeNode(nodeId);
+        console.log(`removeNode: removed node ${nodeId} from Rete editor`);
+      } catch (err) {
+        console.error('removeNode: error removing from Rete editor:', err);
+      }
+    }
   }
+}
+
+async function undoDeleteNode(): Promise<CompositeNode | null> {
+  if (undoStack.value.length === 0) {
+    console.log('undoDeleteNode: nothing to undo');
+    return null;
+  }
+
+  const entry = undoStack.value.pop()!;
+
+  // Check if we're still on the same rule
+  if (currentRuleId.value !== entry.ruleId) {
+    console.warn('undoDeleteNode: rule context changed, cannot undo');
+    return null;
+  }
+
+  const rule = compositeRules.value.find(r => r.id === currentRuleId.value);
+  if (!rule) return null;
+
+  // Restore the node
+  rule.nodes.push(entry.node);
+
+  // Restore connections (only those whose other endpoint still exists)
+  for (const conn of entry.connections) {
+    const otherNodeId = conn.source_node === entry.node.id ? conn.target_node : conn.source_node;
+    const otherNodeExists = rule.nodes.some(n => n.id === otherNodeId);
+    if (otherNodeExists) {
+      rule.connections.push(conn);
+    }
+  }
+
+  dirty.value = true;
+  console.log(`undoDeleteNode: restored node ${entry.node.id}`);
+
+  // Add back to Rete editor
+  if (reteEditor.value && reteArea.value) {
+    try {
+      const reteNode = createReteNode(entry.node);
+      if (reteNode) {
+        await reteEditor.value.addNode(reteNode);
+        await reteArea.value.translate(reteNode.id, {
+          x: entry.node.position.x,
+          y: entry.node.position.y,
+        });
+        console.log(`undoDeleteNode: re-added node to Rete editor at (${entry.node.position.x}, ${entry.node.position.y})`);
+      }
+    } catch (err) {
+      console.error('undoDeleteNode: error adding node to Rete editor:', err);
+    }
+  }
+
+  return entry.node;
+}
+
+function canUndo(): boolean {
+  return undoStack.value.length > 0 && undoStack.value[undoStack.value.length - 1]?.ruleId === currentRuleId.value;
+}
+
+function clearUndoStack(): void {
+  undoStack.value = [];
 }
 
 function addConnection(connection: CompositeConnection): void {
@@ -607,7 +774,7 @@ async function syncRuleToEditor(): Promise<void> {
   }
 
   const rule = currentRule.value;
-  console.log(`syncRuleToEditor: syncing ${rule.nodes.length} nodes to Rete editor`);
+  console.log(`syncRuleToEditor: syncing ${rule.nodes.length} nodes and ${rule.connections.length} connections to Rete editor`);
 
   // Add all nodes to the editor
   for (const node of rule.nodes) {
@@ -621,8 +788,48 @@ async function syncRuleToEditor(): Promise<void> {
     }
   }
 
-  // TODO: Add connections as well
-  // For now, focus on nodes appearing first
+  // Add all connections to the editor
+  for (const conn of rule.connections) {
+    try {
+      const sourceNode = reteEditor.value.getNode(conn.source_node);
+      const targetNode = reteEditor.value.getNode(conn.target_node);
+
+      if (sourceNode && targetNode) {
+        const sourceOutput = sourceNode.outputs[conn.source_socket];
+        const targetInput = targetNode.inputs[conn.target_socket];
+
+        if (sourceOutput && targetInput) {
+          const reteConnection = new ClassicPreset.Connection(sourceNode, conn.source_socket, targetNode, conn.target_socket);
+          await reteEditor.value.addConnection(reteConnection);
+          console.log(`syncRuleToEditor: added connection ${conn.source_node}:${conn.source_socket} -> ${conn.target_node}:${conn.target_socket}`);
+        } else {
+          console.warn(`syncRuleToEditor: missing socket for connection`, {
+            sourceSocket: conn.source_socket,
+            targetSocket: conn.target_socket,
+            availableOutputs: Object.keys(sourceNode.outputs),
+            availableInputs: Object.keys(targetNode.inputs),
+          });
+        }
+      } else {
+        console.warn(`syncRuleToEditor: missing node for connection`, {
+          sourceNodeId: conn.source_node,
+          targetNodeId: conn.target_node,
+          sourceExists: !!sourceNode,
+          targetExists: !!targetNode,
+        });
+      }
+    } catch (err) {
+      console.error('syncRuleToEditor: error adding connection:', err, conn);
+    }
+  }
+
+  // Zoom to fit all nodes after syncing
+  const allNodes = reteEditor.value.getNodes();
+  if (allNodes.length > 0) {
+    await AreaExtensions.zoomAt(reteArea.value, allNodes);
+    console.log(`syncRuleToEditor: zoomed to fit ${allNodes.length} nodes`);
+  }
+
   console.log('syncRuleToEditor: done');
 }
 
@@ -659,6 +866,9 @@ export function useRuleEditor() {
     addNode,
     updateNode,
     removeNode,
+    undoDeleteNode,
+    canUndo,
+    clearUndoStack,
     addConnection,
     removeConnection,
     updateOutputAction,

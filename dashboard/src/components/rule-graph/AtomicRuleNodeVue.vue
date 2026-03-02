@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { Ref as ReteRef } from 'rete-vue-plugin';
 import { SOCKET_TYPE_COLORS } from '@gateway/socket-registry';
 
 const props = defineProps<{
   data: {
+    id: string;
     label: string;
     ruleId: string;
     ruleName: string;
@@ -11,7 +13,7 @@ const props = defineProps<{
     reads: string[];
     outputs: Record<string, { id: string; label?: string; socket: { name: string } }>;
   };
-  emit: (event: any) => void;
+  emit: (data: any) => void;
 }>();
 
 const badgeColor = computed(() => {
@@ -46,15 +48,20 @@ const outputsList = computed(() => {
         <span v-for="f in data.reads.slice(0, 2)" :key="f" class="rn-field">{{ f }}</span>
         <span v-if="data.reads.length > 2" class="rn-more">+{{ data.reads.length - 2 }}</span>
       </div>
-      <!-- Output sockets -->
+      <!-- Output sockets with Rete Ref for position tracking -->
       <div class="rn-outputs">
         <div v-for="output in outputsList" :key="output.key" class="rn-output">
           <span class="rn-output-label">{{ output.label || 'Result' }}</span>
-          <div
-            class="rn-socket output-socket"
-            :data-output-key="output.key"
-            :style="{ background: socketColor }"
-          />
+          <ReteRef
+            :data="{ type: 'socket', side: 'output', key: output.key, nodeId: data.id, payload: output.socket }"
+            :emit="emit"
+          >
+            <div
+              class="rn-socket output-socket"
+              :data-output-key="output.key"
+              :style="{ background: socketColor }"
+            />
+          </ReteRef>
         </div>
       </div>
     </template>

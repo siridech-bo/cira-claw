@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { Ref as ReteRef } from 'rete-vue-plugin';
 
 const props = defineProps<{
   data: {
@@ -9,7 +10,7 @@ const props = defineProps<{
     inputs: Record<string, { id: string; label?: string; socket: { name: string } }>;
     outputs: Record<string, { id: string; label?: string; socket: { name: string } }>;
   };
-  emit: (event: any) => void;
+  emit: (data: any) => void;
 }>();
 
 const colors: Record<string, string> = {
@@ -48,29 +49,39 @@ const outputsList = computed(() => {
 
 <template>
   <div class="rn-op" :style="{ borderColor: borderColor }">
-    <!-- Input sockets on the left -->
+    <!-- Input sockets on the left with Rete Ref for position tracking -->
     <div class="rn-inputs">
       <div v-for="input in inputsList" :key="input.key" class="rn-input">
-        <div
-          class="rn-socket input-socket"
-          :data-input-key="input.key"
-          :style="{ background: borderColor }"
-        />
+        <ReteRef
+          :data="{ type: 'socket', side: 'input', key: input.key, nodeId: data.id, payload: input.socket }"
+          :emit="emit"
+        >
+          <div
+            class="rn-socket input-socket"
+            :data-input-key="input.key"
+            :style="{ background: borderColor }"
+          />
+        </ReteRef>
         <span class="rn-input-label">{{ input.label || input.key }}</span>
       </div>
     </div>
 
     <span class="rn-op-label" :style="{ color: textColor }">{{ data?.operator || 'OP' }}</span>
 
-    <!-- Output socket on the right -->
+    <!-- Output socket on the right with Rete Ref for position tracking -->
     <div class="rn-outputs">
       <div v-for="output in outputsList" :key="output.key" class="rn-output">
         <span class="rn-output-label">{{ output.label || 'Result' }}</span>
-        <div
-          class="rn-socket output-socket"
-          :data-output-key="output.key"
-          :style="{ background: borderColor }"
-        />
+        <ReteRef
+          :data="{ type: 'socket', side: 'output', key: output.key, nodeId: data.id, payload: output.socket }"
+          :emit="emit"
+        >
+          <div
+            class="rn-socket output-socket"
+            :data-output-key="output.key"
+            :style="{ background: borderColor }"
+          />
+        </ReteRef>
       </div>
     </div>
   </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { Ref as ReteRef } from 'rete-vue-plugin';
 
 const props = defineProps<{
   data: {
@@ -9,7 +10,7 @@ const props = defineProps<{
     id: string;
     inputs: Record<string, { id: string; label?: string; socket: { name: string } }>;
   };
-  emit: (event: any) => void;
+  emit: (data: any) => void;
 }>();
 
 const icons: Record<string, string> = {
@@ -32,13 +33,18 @@ const inputsList = computed(() => {
 
 <template>
   <div class="rn-action">
-    <!-- Input socket on the left -->
+    <!-- Input socket on the left with Rete Ref for position tracking -->
     <div class="rn-inputs">
       <div v-for="input in inputsList" :key="input.key" class="rn-input">
-        <div
-          class="rn-socket input-socket"
-          :data-input-key="input.key"
-        />
+        <ReteRef
+          :data="{ type: 'socket', side: 'input', key: input.key, nodeId: data.id, payload: input.socket }"
+          :emit="emit"
+        >
+          <div
+            class="rn-socket input-socket"
+            :data-input-key="input.key"
+          />
+        </ReteRef>
       </div>
     </div>
     <span class="rn-action-icon">{{ icons[data?.action] ?? '⚙️' }}</span>
