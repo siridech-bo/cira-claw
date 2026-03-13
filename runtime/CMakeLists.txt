@@ -102,6 +102,8 @@ endif()
 set(CIRA_SOURCES
     src/cira.c
     src/yolo_decoder.c
+    src/signal_buffer.c
+    src/signal_features.c
 )
 
 if(CIRA_ENABLE_DARKNET)

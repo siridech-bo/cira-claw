@@ -823,6 +823,170 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
     return CIRA_OK;
 }
 
+/* === Signal Prediction (Spec C) === */
+
+/**
+ * Parse signal model output based on format string.
+ * Updates ctx->result_json with result.
+ */
+static int parse_signal_output(cira_ctx* ctx, float* output_data, int output_size) {
+    const char* fmt = ctx->signal_output_format;
+
+    if (strcmp(fmt, "label_prob") == 0) {
+        /* Classification: output is [prob_class_0, prob_class_1, ...] */
+        /* Find class with max probability */
+        int max_class = 0;
+        float max_prob = output_data[0];
+        for (int i = 1; i < output_size && i < ctx->num_labels; i++) {
+            if (output_data[i] > max_prob) {
+                max_prob = output_data[i];
+                max_class = i;
+            }
+        }
+
+        const char* label = (max_class < ctx->num_labels) ? ctx->labels[max_class] : "unknown";
+        snprintf(ctx->result_json, CIRA_MAX_JSON_LEN,
+                 "{\"class\":\"%s\",\"probability\":%.4f}",
+                 label, max_prob);
+
+    } else if (strcmp(fmt, "softmax") == 0) {
+        /* Softmax probabilities for all classes */
+        char* p = ctx->result_json;
+        char* end = ctx->result_json + CIRA_MAX_JSON_LEN;
+        p += snprintf(p, end - p, "{\"classes\":[");
+
+        for (int i = 0; i < output_size && i < ctx->num_labels && p < end - 128; i++) {
+            const char* label = ctx->labels[i];
+            if (i > 0) p += snprintf(p, end - p, ",");
+            p += snprintf(p, end - p, "{\"label\":\"%s\",\"prob\":%.4f}",
+                         label, output_data[i]);
+        }
+        p += snprintf(p, end - p, "]}");
+
+    } else if (strcmp(fmt, "reconstruction") == 0) {
+        /* Autoencoder: output is reconstructed input, compare via MSE */
+        /* Compute MSE between input features (stored in signal buffer) and output */
+        /* For now, just compute L2 norm of output as anomaly score */
+        float mse = 0.0f;
+        for (int i = 0; i < output_size; i++) {
+            mse += output_data[i] * output_data[i];
+        }
+        mse /= output_size;
+
+        int is_anomaly = (mse > ctx->signal_anomaly_threshold) ? 1 : 0;
+        snprintf(ctx->result_json, CIRA_MAX_JSON_LEN,
+                 "{\"anomaly_score\":%.6f,\"is_anomaly\":%s,\"threshold\":%.6f}",
+                 mse, is_anomaly ? "true" : "false", ctx->signal_anomaly_threshold);
+
+    } else if (strcmp(fmt, "anomaly_score") == 0) {
+        /* Direct anomaly score output (single value) */
+        float score = output_data[0];
+        int is_anomaly = (score > ctx->signal_anomaly_threshold) ? 1 : 0;
+        snprintf(ctx->result_json, CIRA_MAX_JSON_LEN,
+                 "{\"anomaly_score\":%.6f,\"is_anomaly\":%s,\"threshold\":%.6f}",
+                 score, is_anomaly ? "true" : "false", ctx->signal_anomaly_threshold);
+
+    } else {
+        /* Unknown format - just return raw values */
+        char* p = ctx->result_json;
+        char* end = ctx->result_json + CIRA_MAX_JSON_LEN;
+        p += snprintf(p, end - p, "{\"output\":[");
+
+        for (int i = 0; i < output_size && p < end - 64; i++) {
+            if (i > 0) p += snprintf(p, end - p, ",");
+            p += snprintf(p, end - p, "%.6f", output_data[i]);
+        }
+        p += snprintf(p, end - p, "]}");
+    }
+
+    return CIRA_OK;
+}
+
+/**
+ * Run ONNX inference on pre-computed feature tensor (for signal data).
+ * Called by cira_predict_signal().
+ *
+ * @param ctx Context with loaded ONNX model
+ * @param tensor Feature tensor (num_channels * num_features)
+ * @param size Tensor size (total elements)
+ * @return CIRA_OK on success
+ */
+int onnx_predict_tensor(cira_ctx* ctx, const float* tensor, int size) {
+    if (!ctx || !ctx->model_handle || !tensor) {
+        cira_set_error(ctx, "Invalid parameters to onnx_predict_tensor");
+        return CIRA_ERROR_INPUT;
+    }
+
+    onnx_model_t* model = (onnx_model_t*)ctx->model_handle;
+
+    OrtStatus* status = NULL;
+
+    /* Create input tensor from feature vector */
+    /* Assume 2D shape: [1, num_features] */
+    int64_t input_shape[2] = {1, size};
+    OrtValue* input_tensor = NULL;
+
+    status = g_ort->CreateTensorWithDataAsOrtValue(
+        model->memory_info,
+        (void*)tensor, size * sizeof(float),
+        input_shape, 2,
+        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+        &input_tensor);
+
+    if (status != NULL) {
+        fprintf(stderr, "Failed to create signal input tensor: %s\n",
+                g_ort->GetErrorMessage(status));
+        g_ort->ReleaseStatus(status);
+        return CIRA_ERROR;
+    }
+
+    /* Run inference */
+    const char* input_names[] = { model->input_name };
+    const char* out_names[] = { model->output_names[0] };  /* Use first output only */
+
+    OrtValue* output_tensor = NULL;
+
+    status = g_ort->Run(model->session, NULL,
+                        input_names, (const OrtValue* const*)&input_tensor, 1,
+                        out_names, 1, &output_tensor);
+
+    g_ort->ReleaseValue(input_tensor);
+
+    if (status != NULL) {
+        fprintf(stderr, "ONNX signal inference failed: %s\n",
+                g_ort->GetErrorMessage(status));
+        g_ort->ReleaseStatus(status);
+        return CIRA_ERROR;
+    }
+
+    /* Get output data */
+    float* output_data = NULL;
+    status = g_ort->GetTensorMutableData(output_tensor, (void**)&output_data);
+    if (status != NULL) {
+        g_ort->ReleaseStatus(status);
+        g_ort->ReleaseValue(output_tensor);
+        return CIRA_ERROR;
+    }
+
+    /* Get output shape to determine size */
+    OrtTensorTypeAndShapeInfo* output_info = NULL;
+    ORT_IGNORE(g_ort->GetTensorTypeAndShape(output_tensor, &output_info));
+
+    size_t output_size = 0;
+    if (output_info) {
+        ORT_IGNORE(g_ort->GetTensorShapeElementCount(output_info, &output_size));
+        g_ort->ReleaseTensorTypeAndShapeInfo(output_info);
+    }
+
+    /* Parse output based on signal_output_format */
+    parse_signal_output(ctx, output_data, (int)output_size);
+
+    g_ort->ReleaseValue(output_tensor);
+
+    fprintf(stderr, "ONNX signal inference complete: %s\n", ctx->result_json);
+    return CIRA_OK;
+}
+
 #else /* CIRA_ONNX_ENABLED */
 
 /* Stubs when ONNX is not enabled */
@@ -841,6 +1005,13 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
     (void)w;
     (void)h;
     (void)channels;
+    cira_set_error(ctx, "ONNX support not enabled in this build");
+    return CIRA_ERROR_MODEL;
+}
+
+int onnx_predict_tensor(cira_ctx* ctx, const float* tensor, int size) {
+    (void)tensor;
+    (void)size;
     cira_set_error(ctx, "ONNX support not enabled in this build");
     return CIRA_ERROR_MODEL;
 }

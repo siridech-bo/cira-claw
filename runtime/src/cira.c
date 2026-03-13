@@ -9,6 +9,7 @@
 
 #include "cira.h"
 #include "cira_internal.h"
+#include "signal_features.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -249,6 +250,36 @@ static int json_get_float(const char* json, const char* key, float* out) {
     return 1;
 }
 
+/* Parse JSON string array (for signal feature names) */
+static int json_get_string_array(const char* json, const char* key, char out[][128], int max_count) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+
+    const char* pos = strstr(json, pattern);
+    if (!pos) return 0;
+
+    pos += strlen(pattern);
+    while (*pos && (*pos == ' ' || *pos == ':' || *pos == '\t')) pos++;
+    if (*pos != '[') return 0;
+    pos++;
+
+    int count = 0;
+    while (*pos && *pos != ']' && count < max_count) {
+        while (*pos && (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == ',')) pos++;
+        if (*pos == '"') {
+            pos++;
+            int i = 0;
+            while (*pos && *pos != '"' && i < 127) {
+                out[count][i++] = *pos++;
+            }
+            out[count][i] = '\0';
+            if (*pos == '"') pos++;
+            if (out[count][0] != '\0') count++;
+        }
+    }
+    return count;
+}
+
 /* Load model manifest (cira_model.json) */
 static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
     char manifest_path[1024];
@@ -326,6 +357,32 @@ static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
     if (json_get_int(json, "num_classes", &num_classes) && num_classes > 0) {
         fprintf(stderr, "Manifest: num_classes=%d\n", num_classes);
         /* num_classes is used by loaders, not stored in ctx directly */
+    }
+
+    /* === Signal ingestion fields (Spec C) === */
+
+    /* Parse selected features array */
+    ctx->signal_num_selected = json_get_string_array(json, "signal_selected_features",
+                                                      ctx->signal_selected_features, 256);
+    if (ctx->signal_num_selected > 0) {
+        fprintf(stderr, "Manifest: signal_selected_features (count=%d)\n", ctx->signal_num_selected);
+    }
+
+    /* Parse output format */
+    if (json_get_string(json, "signal_output_format", ctx->signal_output_format,
+                        sizeof(ctx->signal_output_format))) {
+        fprintf(stderr, "Manifest: signal_output_format=%s\n", ctx->signal_output_format);
+    } else {
+        strcpy(ctx->signal_output_format, "label_prob");  /* default */
+    }
+
+    /* Parse anomaly threshold */
+    float anomaly_thresh = 0;
+    if (json_get_float(json, "signal_anomaly_threshold", &anomaly_thresh) && anomaly_thresh > 0) {
+        ctx->signal_anomaly_threshold = anomaly_thresh;
+        fprintf(stderr, "Manifest: signal_anomaly_threshold=%.3f\n", anomaly_thresh);
+    } else {
+        ctx->signal_anomaly_threshold = 0.5f;  /* default */
     }
 
     free(json);
@@ -445,6 +502,12 @@ cira_ctx* cira_create(void) {
     ctx->start_time = time(NULL);
     memset(ctx->detections_by_label, 0, sizeof(ctx->detections_by_label));
 
+    /* Initialize signal ingestion fields (Spec C) */
+    ctx->signal_buffer = NULL;
+    ctx->signal_num_selected = 0;
+    strcpy(ctx->signal_output_format, "label_prob");
+    ctx->signal_anomaly_threshold = 0.5f;
+
     return ctx;
 }
 
@@ -491,6 +554,12 @@ void cira_destroy(cira_ctx* ctx) {
 
     if (ctx->frame_buffer) {
         free(ctx->frame_buffer);
+    }
+
+    /* Destroy signal buffer (Spec C) */
+    if (ctx->signal_buffer) {
+        signal_buffer_destroy(ctx->signal_buffer);
+        ctx->signal_buffer = NULL;
     }
 
     pthread_mutex_destroy(&ctx->result_mutex);
@@ -795,4 +864,126 @@ int cira_stop_server(cira_ctx* ctx) {
 float cira_get_fps(cira_ctx* ctx) {
     if (!ctx) return 0.0f;
     return ctx->current_fps;
+}
+
+/* === Signal API (Spec C) === */
+
+int cira_feed_signal(cira_ctx* ctx, int channel_idx, float value) {
+    if (!ctx || !ctx->signal_buffer) return CIRA_ERROR_INPUT;
+    return signal_buffer_feed(ctx->signal_buffer, channel_idx, value);
+}
+
+int cira_feed_signal_batch(cira_ctx* ctx, int channel_idx,
+                           const float* values, int count) {
+    if (!ctx || !ctx->signal_buffer || !values) return CIRA_ERROR_INPUT;
+
+    for (int i = 0; i < count; i++) {
+        int ret = signal_buffer_feed(ctx->signal_buffer, channel_idx, values[i]);
+        if (ret != 0) return CIRA_ERROR;
+    }
+
+    return CIRA_OK;
+}
+
+int cira_signal_ready(cira_ctx* ctx) {
+    if (!ctx || !ctx->signal_buffer) return -1;
+    return signal_buffer_ready(ctx->signal_buffer) ? 1 : 0;
+}
+
+int cira_predict_signal(cira_ctx* ctx) {
+    if (!ctx || !ctx->signal_buffer) return CIRA_ERROR_INPUT;
+    if (ctx->status != CIRA_STATUS_READY) return CIRA_ERROR;
+    if (ctx->format == CIRA_FORMAT_UNKNOWN || !ctx->model_handle) {
+        cira_set_error(ctx, "No model loaded");
+        return CIRA_ERROR_MODEL;
+    }
+
+    /* Only ONNX models support signal prediction currently */
+    if (ctx->format != CIRA_FORMAT_ONNX) {
+        cira_set_error(ctx, "Signal prediction only supported for ONNX models");
+        return CIRA_ERROR_MODEL;
+    }
+
+    /* Check if buffer is ready */
+    if (!signal_buffer_ready(ctx->signal_buffer)) {
+        cira_set_error(ctx, "Signal buffer not ready for inference");
+        return CIRA_ERROR_INPUT;
+    }
+
+    pthread_mutex_lock(&ctx->result_mutex);
+
+    /* Forward to ONNX loader's signal prediction */
+    #ifdef CIRA_ONNX_ENABLED
+    extern int onnx_predict_tensor(cira_ctx* ctx, const float* tensor, int size);
+
+    /* Get feature vector from signal buffer */
+    int num_channels = ctx->signal_buffer->num_channels;
+    int window_size = ctx->signal_buffer->window_size;
+    int num_selected = ctx->signal_num_selected;
+
+    /* Allocate feature vector: num_channels * num_selected_features */
+    int feature_size = num_channels * num_selected;
+    float* features = (float*)malloc(feature_size * sizeof(float));
+    if (!features) {
+        pthread_mutex_unlock(&ctx->result_mutex);
+        cira_set_error(ctx, "Failed to allocate feature buffer");
+        return CIRA_ERROR_MEMORY;
+    }
+
+    /* Extract features for each channel */
+    for (int ch = 0; ch < num_channels; ch++) {
+        const float* window = signal_buffer_get_channel_window(ctx->signal_buffer, ch);
+        if (!window) {
+            free(features);
+            pthread_mutex_unlock(&ctx->result_mutex);
+            cira_set_error(ctx, "Failed to get signal window");
+            return CIRA_ERROR;
+        }
+
+        /* Compute all 46 features */
+        float all_features[46];
+        signal_compute_features(window, window_size, 1000.0f, all_features);
+
+        /* Select only the requested features */
+        for (int i = 0; i < num_selected; i++) {
+            int feature_idx = signal_feature_index(ctx->signal_selected_features[i]);
+            if (feature_idx >= 0 && feature_idx < 46) {
+                features[ch * num_selected + i] = all_features[feature_idx];
+            } else {
+                features[ch * num_selected + i] = 0.0f;
+            }
+        }
+    }
+
+    /* Run inference */
+    int result = onnx_predict_tensor(ctx, features, feature_size);
+
+    free(features);
+
+    /* Advance buffer by stride */
+    signal_buffer_advance(ctx->signal_buffer);
+
+    pthread_mutex_unlock(&ctx->result_mutex);
+
+    return result;
+    #else
+    pthread_mutex_unlock(&ctx->result_mutex);
+    cira_set_error(ctx, "ONNX support not enabled");
+    return CIRA_ERROR_MODEL;
+    #endif
+}
+
+int cira_signal_stats(cira_ctx* ctx, int channel_idx,
+                      float* out_rms, float* out_peak, float* out_mean) {
+    if (!ctx || !ctx->signal_buffer) return CIRA_ERROR_INPUT;
+
+    float rms = signal_buffer_rms(ctx->signal_buffer, channel_idx);
+    float peak = signal_buffer_peak(ctx->signal_buffer, channel_idx);
+    float mean = signal_buffer_mean(ctx->signal_buffer, channel_idx);
+
+    if (out_rms) *out_rms = rms;
+    if (out_peak) *out_peak = peak;
+    if (out_mean) *out_mean = mean;
+
+    return CIRA_OK;
 }

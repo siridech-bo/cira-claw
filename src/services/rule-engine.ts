@@ -50,10 +50,21 @@ export interface RulePayload {
     id: string;
     status: string;
   };
-  // Reserved for Spec C — Universal Signal Ingestion
-  // Will carry vibration, current, audio, temperature snapshots
-  // Leave empty in Spec A — do not remove this field
-  signals?: Record<string, unknown>;
+  // Spec C v4 — Universal Signal Ingestion
+  signals?: {
+    [channelName: string]: {
+      rms: number;
+      peak: number;
+      mean: number;
+      window_ready: boolean;
+    };
+  };
+  signal_prediction?: {
+    label: string;
+    confidence: number;
+    is_anomaly: boolean;
+    output_format: string;
+  };
 }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────

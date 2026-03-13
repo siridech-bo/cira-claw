@@ -13,6 +13,7 @@ CMakeFiles/cira.dir/src/cira.c.obj: \
  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
  D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h \
+ D:/CiRA\ Claw/cira-edge/runtime/include/signal_buffer.h \
  C:/msys64/mingw64/include/pthread.h C:/msys64/mingw64/include/errno.h \
  C:/msys64/mingw64/include/sys/types.h \
  C:/msys64/mingw64/include/_mingw_off_t.h \
@@ -29,6 +30,7 @@ CMakeFiles/cira.dir/src/cira.c.obj: \
  C:/msys64/mingw64/include/pthread_compat.h \
  C:/msys64/mingw64/include/sched.h \
  C:/msys64/mingw64/include/pthread_unistd.h \
+ D:/CiRA\ Claw/cira-edge/runtime/include/signal_features.h \
  C:/msys64/mingw64/include/stdlib.h \
  C:/msys64/mingw64/include/corecrt_wstdlib.h \
  C:/msys64/mingw64/include/sec_api/stdlib_s.h \

@@ -102,6 +102,59 @@ int cira_predict_sensor(cira_ctx* ctx, const float* values, int count);
  */
 int cira_predict_batch(cira_ctx* ctx, const uint8_t** images, int count, int w, int h, int channels);
 
+/* === Signal API (Spec C) === */
+
+/**
+ * Feed one signal sample to a channel
+ *
+ * @param ctx Context handle
+ * @param channel_idx Channel index
+ * @param value Sample value
+ * @return CIRA_OK on success, error code on failure
+ */
+int cira_feed_signal(cira_ctx* ctx, int channel_idx, float value);
+
+/**
+ * Feed multiple signal samples to a channel
+ *
+ * @param ctx Context handle
+ * @param channel_idx Channel index
+ * @param values Array of sample values
+ * @param count Number of samples
+ * @return CIRA_OK on success, error code on failure
+ */
+int cira_feed_signal_batch(cira_ctx* ctx, int channel_idx,
+                           const float* values, int count);
+
+/**
+ * Check if signal buffer is ready for inference
+ *
+ * @param ctx Context handle
+ * @return 1 if ready, 0 otherwise, -1 on error
+ */
+int cira_signal_ready(cira_ctx* ctx);
+
+/**
+ * Run inference on accumulated signal data
+ *
+ * @param ctx Context handle
+ * @return CIRA_OK on success, error code on failure
+ */
+int cira_predict_signal(cira_ctx* ctx);
+
+/**
+ * Get signal channel statistics
+ *
+ * @param ctx Context handle
+ * @param channel_idx Channel index
+ * @param out_rms Output: RMS value
+ * @param out_peak Output: peak-to-peak value
+ * @param out_mean Output: mean value
+ * @return CIRA_OK on success, error code on failure
+ */
+int cira_signal_stats(cira_ctx* ctx, int channel_idx,
+                      float* out_rms, float* out_peak, float* out_mean);
+
 /* === Result functions === */
 
 /**

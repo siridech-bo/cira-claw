@@ -12,6 +12,7 @@
 
 #include "cira.h"
 #include "yolo_decoder.h"
+#include "signal_buffer.h"
 #include <pthread.h>
 #include <time.h>
 
@@ -75,6 +76,13 @@ struct cira_ctx {
     float confidence_threshold;
     float nms_threshold;
     yolo_version_t yolo_version;    /* YOLO version (from manifest or auto-detect) */
+
+    /* Signal ingestion (Spec C) */
+    signal_buffer_t*  signal_buffer;                     /* NULL for image-only models */
+    char   signal_selected_features[256][128];           /* selected feature names */
+    int    signal_num_selected;                          /* count of selected features */
+    char   signal_output_format[32];                     /* label_prob|softmax|reconstruction|anomaly_score */
+    float  signal_anomaly_threshold;                     /* for reconstruction format */
 
     /* Results */
     cira_detection_t detections[CIRA_MAX_DETECTIONS];

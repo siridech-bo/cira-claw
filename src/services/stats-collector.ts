@@ -512,6 +512,69 @@ export class StatsCollector extends EventEmitter {
       // Runtime not reachable — use empty detections
     }
 
+    // Spec C v4: Fetch signal data (non-blocking, silent on failure)
+    let signals: {
+      [channelName: string]: {
+        rms: number;
+        peak: number;
+        mean: number;
+        window_ready: boolean;
+      };
+    } | undefined = undefined;
+    let signal_prediction: {
+      label: string;
+      confidence: number;
+      is_anomaly: boolean;
+      output_format: string;
+    } | undefined = undefined;
+
+    try {
+      const node = this.nodeManager.getNode(nodeId);
+      if (node?.runtime?.port) {
+        const signalResp = await fetch(
+          `http://${node.host || 'localhost'}:${node.runtime.port}/api/signals`,
+          { signal: AbortSignal.timeout(2000) }
+        );
+        if (signalResp.ok) {
+          const signalData = await signalResp.json() as {
+            channels?: Array<{
+              name: string;
+              rms: number;
+              peak: number;
+              mean: number;
+              window_ready: boolean;
+            }>;
+            prediction?: {
+              label: string;
+              confidence: number;
+              is_anomaly: boolean;
+              output_format: string;
+            };
+          };
+
+          // Transform channels array to object keyed by channel name
+          if (signalData.channels && Array.isArray(signalData.channels)) {
+            signals = {};
+            for (const ch of signalData.channels) {
+              signals[ch.name] = {
+                rms: ch.rms,
+                peak: ch.peak,
+                mean: ch.mean,
+                window_ready: ch.window_ready,
+              };
+            }
+          }
+
+          // Include prediction if present
+          if (signalData.prediction) {
+            signal_prediction = signalData.prediction;
+          }
+        }
+      }
+    } catch {
+      // Signal endpoint not available (image-only runtime) — silently skip
+    }
+
     const daily = await this.getDailySummary();
     const nodeSummary = daily[nodeId];
     const hourly = nodeSummary?.hours?.map((h) => ({
@@ -542,7 +605,8 @@ export class StatsCollector extends EventEmitter {
       },
       hourly,
       node: { id: nodeId, status: stats.modelLoaded ? 'running' : 'offline' },
-      // signals: {} — reserved for Spec C, leave undefined
+      signals,
+      signal_prediction,
     };
   }
 

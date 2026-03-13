@@ -13,6 +13,7 @@ CMakeFiles/cira.dir/src/onnx_loader.c.obj: \
  D:/CiRA\ Claw/cira-edge/runtime/include/cira_internal.h \
  D:/CiRA\ Claw/cira-edge/runtime/include/cira.h \
  D:/CiRA\ Claw/cira-edge/runtime/include/yolo_decoder.h \
+ D:/CiRA\ Claw/cira-edge/runtime/include/signal_buffer.h \
  C:/msys64/mingw64/include/pthread.h C:/msys64/mingw64/include/errno.h \
  C:/msys64/mingw64/include/sys/types.h \
  C:/msys64/mingw64/include/_mingw_off_t.h \
