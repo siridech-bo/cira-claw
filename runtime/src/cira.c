@@ -280,6 +280,65 @@ static int json_get_string_array(const char* json, const char* key, char out[][1
     return count;
 }
 
+/* Extract nested JSON object value as a malloc'd string */
+static char* json_extract_object(const char* json, const char* key) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+
+    const char* pos = strstr(json, pattern);
+    if (!pos) return NULL;
+
+    pos += strlen(pattern);
+    while (*pos && (*pos == ' ' || *pos == ':' || *pos == '\t' || *pos == '\n')) pos++;
+    if (*pos != '{') return NULL;
+
+    /* Count braces to find matching close brace */
+    const char* start = pos;
+    int depth = 0;
+    while (*pos) {
+        if (*pos == '{') depth++;
+        else if (*pos == '}') {
+            depth--;
+            if (depth == 0) {
+                /* Found matching brace */
+                int len = pos - start + 1;
+                char* obj = (char*)malloc(len + 1);
+                if (obj) {
+                    memcpy(obj, start, len);
+                    obj[len] = '\0';
+                }
+                return obj;
+            }
+        }
+        pos++;
+    }
+    return NULL;
+}
+
+/* Parse float array from JSON */
+static int json_get_float_array(const char* json, const char* key, float* out, int max_count) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+
+    const char* pos = strstr(json, pattern);
+    if (!pos) return 0;
+
+    pos += strlen(pattern);
+    while (*pos && (*pos == ' ' || *pos == ':' || *pos == '\t')) pos++;
+    if (*pos != '[') return 0;
+    pos++;
+
+    int count = 0;
+    while (*pos && *pos != ']' && count < max_count) {
+        while (*pos && (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == ',')) pos++;
+        if (*pos == '-' || (*pos >= '0' && *pos <= '9')) {
+            out[count++] = (float)atof(pos);
+            while (*pos && *pos != ',' && *pos != ']') pos++;
+        }
+    }
+    return count;
+}
+
 /* Load model manifest (cira_model.json) */
 static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
     char manifest_path[1024];
@@ -317,6 +376,12 @@ static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
     /* Model name */
     if (json_get_string(json, "name", ctx->model_name, sizeof(ctx->model_name))) {
         fprintf(stderr, "Manifest: name=%s\n", ctx->model_name);
+    }
+
+    /* Input type (image or signal) */
+    char input_type[32] = "image";
+    if (json_get_string(json, "input_type", input_type, sizeof(input_type))) {
+        fprintf(stderr, "Manifest: input_type=%s\n", input_type);
     }
 
     char version_str[32] = {0};
@@ -359,30 +424,134 @@ static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
         /* num_classes is used by loaders, not stored in ctx directly */
     }
 
-    /* === Signal ingestion fields (Spec C) === */
+    /* === Signal ingestion fields (Spec C v4) === */
 
-    /* Parse selected features array */
-    ctx->signal_num_selected = json_get_string_array(json, "signal_selected_features",
-                                                      ctx->signal_selected_features, 256);
-    if (ctx->signal_num_selected > 0) {
-        fprintf(stderr, "Manifest: signal_selected_features (count=%d)\n", ctx->signal_num_selected);
-    }
+    if (strcmp(input_type, "signal") == 0) {
+        /* Parse nested signal model manifest */
 
-    /* Parse output format */
-    if (json_get_string(json, "signal_output_format", ctx->signal_output_format,
-                        sizeof(ctx->signal_output_format))) {
-        fprintf(stderr, "Manifest: signal_output_format=%s\n", ctx->signal_output_format);
-    } else {
+        /* --- Parse normalization section --- */
+        char* norm_obj = json_extract_object(json, "normalization");
+        if (!norm_obj) {
+            cira_set_error(ctx, "Signal model missing 'normalization' section");
+            free(json);
+            return CIRA_ERROR_INPUT;
+        }
+
+        char sensor_columns[16][128];
+        int num_channels = json_get_string_array(norm_obj, "sensor_columns", sensor_columns, 16);
+        if (num_channels == 0) {
+            cira_set_error(ctx, "Signal model missing 'sensor_columns'");
+            free(norm_obj);
+            free(json);
+            return CIRA_ERROR_INPUT;
+        }
+
+        float channel_min[16];
+        float channel_max[16];
+        int min_count = json_get_float_array(norm_obj, "channel_min", channel_min, 16);
+        int max_count = json_get_float_array(norm_obj, "channel_max", channel_max, 16);
+
+        if (min_count != num_channels || max_count != num_channels) {
+            cira_set_error(ctx, "Signal model channel_min/max count mismatch");
+            free(norm_obj);
+            free(json);
+            return CIRA_ERROR_INPUT;
+        }
+        free(norm_obj);
+
+        /* --- Parse windowing section --- */
+        char* window_obj = json_extract_object(json, "windowing");
+        int window_size = 128;  /* default */
+        int stride = 64;        /* default */
+
+        if (window_obj) {
+            json_get_int(window_obj, "window_size", &window_size);
+            json_get_int(window_obj, "stride", &stride);
+            free(window_obj);
+        }
+
+        /* --- Parse feature_extraction section --- */
+        char* feat_extract_obj = json_extract_object(json, "feature_extraction");
+        float sample_rate = 100.0f;  /* default */
+
+        if (feat_extract_obj) {
+            json_get_float(feat_extract_obj, "sampling_rate_hz", &sample_rate);
+            free(feat_extract_obj);
+        }
+
+        /* --- Parse feature_selection section --- */
+        char* feat_select_obj = json_extract_object(json, "feature_selection");
+        ctx->signal_num_selected = 0;
+
+        if (feat_select_obj) {
+            ctx->signal_num_selected = json_get_string_array(feat_select_obj, "selected_features",
+                                                              ctx->signal_selected_features, 256);
+            free(feat_select_obj);
+        }
+
+        if (ctx->signal_num_selected == 0) {
+            cira_set_error(ctx, "Signal model missing 'selected_features'");
+            free(json);
+            return CIRA_ERROR_INPUT;
+        }
+
+        /* --- Parse output section --- */
+        char* output_obj = json_extract_object(json, "output");
         strcpy(ctx->signal_output_format, "label_prob");  /* default */
-    }
+        ctx->signal_anomaly_threshold = 0.5f;              /* default */
 
-    /* Parse anomaly threshold */
-    float anomaly_thresh = 0;
-    if (json_get_float(json, "signal_anomaly_threshold", &anomaly_thresh) && anomaly_thresh > 0) {
-        ctx->signal_anomaly_threshold = anomaly_thresh;
-        fprintf(stderr, "Manifest: signal_anomaly_threshold=%.3f\n", anomaly_thresh);
+        if (output_obj) {
+            json_get_string(output_obj, "format", ctx->signal_output_format,
+                           sizeof(ctx->signal_output_format));
+            json_get_float(output_obj, "anomaly_threshold", &ctx->signal_anomaly_threshold);
+            free(output_obj);
+        }
+
+        /* --- Create signal buffer --- */
+        const char* channel_names[16];
+        for (int i = 0; i < num_channels; i++) {
+            channel_names[i] = sensor_columns[i];
+        }
+
+        ctx->signal_buffer = signal_buffer_create(
+            num_channels, channel_names,
+            channel_min, channel_max,
+            window_size, stride, sample_rate
+        );
+
+        if (!ctx->signal_buffer) {
+            cira_set_error(ctx, "Failed to allocate signal buffer");
+            free(json);
+            return CIRA_ERROR_MEMORY;
+        }
+
+        fprintf(stderr, "Signal buffer created: %d channels, window=%d, stride=%d, sr=%.1f Hz\n",
+                num_channels, window_size, stride, sample_rate);
+        fprintf(stderr, "  Features selected: %d\n", ctx->signal_num_selected);
+        fprintf(stderr, "  Output format: %s\n", ctx->signal_output_format);
+        if (strcmp(ctx->signal_output_format, "reconstruction") == 0 ||
+            strcmp(ctx->signal_output_format, "anomaly_score") == 0) {
+            fprintf(stderr, "  Anomaly threshold: %.3f\n", ctx->signal_anomaly_threshold);
+        }
+
     } else {
-        ctx->signal_anomaly_threshold = 0.5f;  /* default */
+        /* Image model - parse flat signal fields for backward compatibility */
+        ctx->signal_num_selected = json_get_string_array(json, "signal_selected_features",
+                                                          ctx->signal_selected_features, 256);
+
+        if (json_get_string(json, "signal_output_format", ctx->signal_output_format,
+                            sizeof(ctx->signal_output_format))) {
+            /* parsed */
+        } else {
+            strcpy(ctx->signal_output_format, "label_prob");
+        }
+
+        float anomaly_thresh = 0;
+        if (json_get_float(json, "signal_anomaly_threshold", &anomaly_thresh) && anomaly_thresh > 0) {
+            ctx->signal_anomaly_threshold = anomaly_thresh;
+        } else {
+            ctx->signal_anomaly_threshold = 0.5f;
+        }
     }
 
     free(json);
@@ -942,7 +1111,8 @@ int cira_predict_signal(cira_ctx* ctx) {
 
         /* Compute all 46 features */
         float all_features[46];
-        signal_compute_features(window, window_size, 1000.0f, all_features);
+        signal_compute_features(window, window_size,
+                                ctx->signal_buffer->sample_rate_hz, all_features);
 
         /* Select only the requested features */
         for (int i = 0; i < num_selected; i++) {

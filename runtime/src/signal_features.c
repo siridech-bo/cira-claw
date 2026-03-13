@@ -490,15 +490,19 @@ void signal_compute_features(
             }
             out[42] = guard_finite(spec_kurt);
 
-            /* [43] band_power_low (0-10 Hz) */
-            /* [44] band_power_mid (10-50 Hz) */
-            /* [45] band_power_high (50+ Hz) */
+            /* [43] band_power_low [0, sr/6) */
+            /* [44] band_power_mid [sr/6, sr/3) */
+            /* [45] band_power_high [sr/3, sr/2] */
+            float sr = sample_rate_hz;
+            float low_cutoff = sr / 6.0f;
+            float mid_cutoff = sr / 3.0f;
+
             float band_low = 0.0f, band_mid = 0.0f, band_high = 0.0f;
             for (int i = 0; i < num_freqs; i++) {
                 float freq = i * freq_resolution;
-                if (freq < 10.0f) {
+                if (freq < low_cutoff) {
                     band_low += magnitude[i];
-                } else if (freq < 50.0f) {
+                } else if (freq < mid_cutoff) {
                     band_mid += magnitude[i];
                 } else {
                     band_high += magnitude[i];

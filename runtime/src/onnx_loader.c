@@ -829,7 +829,9 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
  * Parse signal model output based on format string.
  * Updates ctx->result_json with result.
  */
-static int parse_signal_output(cira_ctx* ctx, float* output_data, int output_size) {
+static int parse_signal_output(cira_ctx* ctx,
+                               const float* input_data, int input_size,
+                               float* output_data, int output_size) {
     const char* fmt = ctx->signal_output_format;
 
     if (strcmp(fmt, "label_prob") == 0) {
@@ -865,13 +867,13 @@ static int parse_signal_output(cira_ctx* ctx, float* output_data, int output_siz
 
     } else if (strcmp(fmt, "reconstruction") == 0) {
         /* Autoencoder: output is reconstructed input, compare via MSE */
-        /* Compute MSE between input features (stored in signal buffer) and output */
-        /* For now, just compute L2 norm of output as anomaly score */
+        int n = (input_size < output_size) ? input_size : output_size;
         float mse = 0.0f;
-        for (int i = 0; i < output_size; i++) {
-            mse += output_data[i] * output_data[i];
+        for (int i = 0; i < n; i++) {
+            float diff = input_data[i] - output_data[i];
+            mse += diff * diff;
         }
-        mse /= output_size;
+        mse /= (n > 0 ? n : 1);
 
         int is_anomaly = (mse > ctx->signal_anomaly_threshold) ? 1 : 0;
         snprintf(ctx->result_json, CIRA_MAX_JSON_LEN,
@@ -979,7 +981,7 @@ int onnx_predict_tensor(cira_ctx* ctx, const float* tensor, int size) {
     }
 
     /* Parse output based on signal_output_format */
-    parse_signal_output(ctx, output_data, (int)output_size);
+    parse_signal_output(ctx, tensor, size, output_data, (int)output_size);
 
     g_ort->ReleaseValue(output_tensor);
 
