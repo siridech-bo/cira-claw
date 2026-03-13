@@ -196,6 +196,19 @@ test_onnx/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_onnx.dir\build.make CMakeFiles/test_onnx.dir/build
 .PHONY : test_onnx/fast
 
+#=============================================================================
+# Target rules for targets named test_signal
+
+# Build rule for target.
+test_signal: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 test_signal
+.PHONY : test_signal
+
+# fast build rule for target.
+test_signal/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_signal.dir\build.make CMakeFiles/test_signal.dir/build
+.PHONY : test_signal/fast
+
 src/cira.obj: src/cira.c.obj
 .PHONY : src/cira.obj
 
@@ -340,6 +353,30 @@ test/test_onnx.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_onnx.dir\build.make CMakeFiles/test_onnx.dir/test/test_onnx.c.s
 .PHONY : test/test_onnx.c.s
 
+test/test_signal.obj: test/test_signal.c.obj
+.PHONY : test/test_signal.obj
+
+# target to build an object file
+test/test_signal.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_signal.dir\build.make CMakeFiles/test_signal.dir/test/test_signal.c.obj
+.PHONY : test/test_signal.c.obj
+
+test/test_signal.i: test/test_signal.c.i
+.PHONY : test/test_signal.i
+
+# target to preprocess a source file
+test/test_signal.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_signal.dir\build.make CMakeFiles/test_signal.dir/test/test_signal.c.i
+.PHONY : test/test_signal.c.i
+
+test/test_signal.s: test/test_signal.c.s
+.PHONY : test/test_signal.s
+
+# target to generate assembly for a file
+test/test_signal.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_signal.dir\build.make CMakeFiles/test_signal.dir/test/test_signal.c.s
+.PHONY : test/test_signal.c.s
+
 # Help Target
 help:
 	@echo The following are some of the valid targets for this Makefile:
@@ -355,6 +392,7 @@ help:
 	@echo ... test
 	@echo ... cira
 	@echo ... test_onnx
+	@echo ... test_signal
 	@echo ... src/cira.obj
 	@echo ... src/cira.i
 	@echo ... src/cira.s
@@ -373,6 +411,9 @@ help:
 	@echo ... test/test_onnx.obj
 	@echo ... test/test_onnx.i
 	@echo ... test/test_onnx.s
+	@echo ... test/test_signal.obj
+	@echo ... test/test_signal.i
+	@echo ... test/test_signal.s
 .PHONY : help
 
 
