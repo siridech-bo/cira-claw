@@ -1,12 +1,22 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/cira.dir/src/annotator.c.obj"
+  "CMakeFiles/cira.dir/src/annotator.c.obj.d"
+  "CMakeFiles/cira.dir/src/camera.cpp.obj"
+  "CMakeFiles/cira.dir/src/camera.cpp.obj.d"
   "CMakeFiles/cira.dir/src/cira.c.obj"
   "CMakeFiles/cira.dir/src/cira.c.obj.d"
+  "CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj"
+  "CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj.d"
+  "CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj"
+  "CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj.d"
   "CMakeFiles/cira.dir/src/onnx_loader.c.obj"
   "CMakeFiles/cira.dir/src/onnx_loader.c.obj.d"
   "CMakeFiles/cira.dir/src/signal_buffer.c.obj"
   "CMakeFiles/cira.dir/src/signal_buffer.c.obj.d"
   "CMakeFiles/cira.dir/src/signal_features.c.obj"
   "CMakeFiles/cira.dir/src/signal_features.c.obj.d"
+  "CMakeFiles/cira.dir/src/stream_server.c.obj"
+  "CMakeFiles/cira.dir/src/stream_server.c.obj.d"
   "CMakeFiles/cira.dir/src/yolo_decoder.c.obj"
   "CMakeFiles/cira.dir/src/yolo_decoder.c.obj.d"
   "libcira.dll"
@@ -16,6 +26,6 @@ file(REMOVE_RECURSE
 )
 
 # Per-language clean rules from dependency scanning.
-foreach(lang C)
+foreach(lang C CXX)
   include(CMakeFiles/cira.dir/cmake_clean_${lang}.cmake OPTIONAL)
 endforeach()

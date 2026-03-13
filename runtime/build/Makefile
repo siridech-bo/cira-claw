@@ -209,6 +209,80 @@ test_signal/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_signal.dir\build.make CMakeFiles/test_signal.dir/build
 .PHONY : test_signal/fast
 
+#=============================================================================
+# Target rules for targets named test_stream
+
+# Build rule for target.
+test_stream: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 test_stream
+.PHONY : test_stream
+
+# fast build rule for target.
+test_stream/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_stream.dir\build.make CMakeFiles/test_stream.dir/build
+.PHONY : test_stream/fast
+
+#=============================================================================
+# Target rules for targets named test_ncnn
+
+# Build rule for target.
+test_ncnn: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 test_ncnn
+.PHONY : test_ncnn
+
+# fast build rule for target.
+test_ncnn/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_ncnn.dir\build.make CMakeFiles/test_ncnn.dir/build
+.PHONY : test_ncnn/fast
+
+src/annotator.obj: src/annotator.c.obj
+.PHONY : src/annotator.obj
+
+# target to build an object file
+src/annotator.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/annotator.c.obj
+.PHONY : src/annotator.c.obj
+
+src/annotator.i: src/annotator.c.i
+.PHONY : src/annotator.i
+
+# target to preprocess a source file
+src/annotator.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/annotator.c.i
+.PHONY : src/annotator.c.i
+
+src/annotator.s: src/annotator.c.s
+.PHONY : src/annotator.s
+
+# target to generate assembly for a file
+src/annotator.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/annotator.c.s
+.PHONY : src/annotator.c.s
+
+src/camera.obj: src/camera.cpp.obj
+.PHONY : src/camera.obj
+
+# target to build an object file
+src/camera.cpp.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/camera.cpp.obj
+.PHONY : src/camera.cpp.obj
+
+src/camera.i: src/camera.cpp.i
+.PHONY : src/camera.i
+
+# target to preprocess a source file
+src/camera.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/camera.cpp.i
+.PHONY : src/camera.cpp.i
+
+src/camera.s: src/camera.cpp.s
+.PHONY : src/camera.s
+
+# target to generate assembly for a file
+src/camera.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/camera.cpp.s
+.PHONY : src/camera.cpp.s
+
 src/cira.obj: src/cira.c.obj
 .PHONY : src/cira.obj
 
@@ -232,6 +306,54 @@ src/cira.s: src/cira.c.s
 src/cira.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/cira.c.s
 .PHONY : src/cira.c.s
+
+src/jpeg_encoder.obj: src/jpeg_encoder.cpp.obj
+.PHONY : src/jpeg_encoder.obj
+
+# target to build an object file
+src/jpeg_encoder.cpp.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj
+.PHONY : src/jpeg_encoder.cpp.obj
+
+src/jpeg_encoder.i: src/jpeg_encoder.cpp.i
+.PHONY : src/jpeg_encoder.i
+
+# target to preprocess a source file
+src/jpeg_encoder.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/jpeg_encoder.cpp.i
+.PHONY : src/jpeg_encoder.cpp.i
+
+src/jpeg_encoder.s: src/jpeg_encoder.cpp.s
+.PHONY : src/jpeg_encoder.s
+
+# target to generate assembly for a file
+src/jpeg_encoder.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/jpeg_encoder.cpp.s
+.PHONY : src/jpeg_encoder.cpp.s
+
+src/ncnn_loader.obj: src/ncnn_loader.cpp.obj
+.PHONY : src/ncnn_loader.obj
+
+# target to build an object file
+src/ncnn_loader.cpp.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj
+.PHONY : src/ncnn_loader.cpp.obj
+
+src/ncnn_loader.i: src/ncnn_loader.cpp.i
+.PHONY : src/ncnn_loader.i
+
+# target to preprocess a source file
+src/ncnn_loader.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/ncnn_loader.cpp.i
+.PHONY : src/ncnn_loader.cpp.i
+
+src/ncnn_loader.s: src/ncnn_loader.cpp.s
+.PHONY : src/ncnn_loader.s
+
+# target to generate assembly for a file
+src/ncnn_loader.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/ncnn_loader.cpp.s
+.PHONY : src/ncnn_loader.cpp.s
 
 src/onnx_loader.obj: src/onnx_loader.c.obj
 .PHONY : src/onnx_loader.obj
@@ -305,6 +427,30 @@ src/signal_features.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/signal_features.c.s
 .PHONY : src/signal_features.c.s
 
+src/stream_server.obj: src/stream_server.c.obj
+.PHONY : src/stream_server.obj
+
+# target to build an object file
+src/stream_server.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/stream_server.c.obj
+.PHONY : src/stream_server.c.obj
+
+src/stream_server.i: src/stream_server.c.i
+.PHONY : src/stream_server.i
+
+# target to preprocess a source file
+src/stream_server.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/stream_server.c.i
+.PHONY : src/stream_server.c.i
+
+src/stream_server.s: src/stream_server.c.s
+.PHONY : src/stream_server.s
+
+# target to generate assembly for a file
+src/stream_server.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/stream_server.c.s
+.PHONY : src/stream_server.c.s
+
 src/yolo_decoder.obj: src/yolo_decoder.c.obj
 .PHONY : src/yolo_decoder.obj
 
@@ -328,6 +474,30 @@ src/yolo_decoder.s: src/yolo_decoder.c.s
 src/yolo_decoder.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\cira.dir\build.make CMakeFiles/cira.dir/src/yolo_decoder.c.s
 .PHONY : src/yolo_decoder.c.s
+
+test/test_ncnn.obj: test/test_ncnn.c.obj
+.PHONY : test/test_ncnn.obj
+
+# target to build an object file
+test/test_ncnn.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_ncnn.dir\build.make CMakeFiles/test_ncnn.dir/test/test_ncnn.c.obj
+.PHONY : test/test_ncnn.c.obj
+
+test/test_ncnn.i: test/test_ncnn.c.i
+.PHONY : test/test_ncnn.i
+
+# target to preprocess a source file
+test/test_ncnn.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_ncnn.dir\build.make CMakeFiles/test_ncnn.dir/test/test_ncnn.c.i
+.PHONY : test/test_ncnn.c.i
+
+test/test_ncnn.s: test/test_ncnn.c.s
+.PHONY : test/test_ncnn.s
+
+# target to generate assembly for a file
+test/test_ncnn.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_ncnn.dir\build.make CMakeFiles/test_ncnn.dir/test/test_ncnn.c.s
+.PHONY : test/test_ncnn.c.s
 
 test/test_onnx.obj: test/test_onnx.c.obj
 .PHONY : test/test_onnx.obj
@@ -377,6 +547,30 @@ test/test_signal.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_signal.dir\build.make CMakeFiles/test_signal.dir/test/test_signal.c.s
 .PHONY : test/test_signal.c.s
 
+test/test_stream.obj: test/test_stream.c.obj
+.PHONY : test/test_stream.obj
+
+# target to build an object file
+test/test_stream.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_stream.dir\build.make CMakeFiles/test_stream.dir/test/test_stream.c.obj
+.PHONY : test/test_stream.c.obj
+
+test/test_stream.i: test/test_stream.c.i
+.PHONY : test/test_stream.i
+
+# target to preprocess a source file
+test/test_stream.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_stream.dir\build.make CMakeFiles/test_stream.dir/test/test_stream.c.i
+.PHONY : test/test_stream.c.i
+
+test/test_stream.s: test/test_stream.c.s
+.PHONY : test/test_stream.s
+
+# target to generate assembly for a file
+test/test_stream.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_stream.dir\build.make CMakeFiles/test_stream.dir/test/test_stream.c.s
+.PHONY : test/test_stream.c.s
+
 # Help Target
 help:
 	@echo The following are some of the valid targets for this Makefile:
@@ -391,11 +585,25 @@ help:
 	@echo ... rebuild_cache
 	@echo ... test
 	@echo ... cira
+	@echo ... test_ncnn
 	@echo ... test_onnx
 	@echo ... test_signal
+	@echo ... test_stream
+	@echo ... src/annotator.obj
+	@echo ... src/annotator.i
+	@echo ... src/annotator.s
+	@echo ... src/camera.obj
+	@echo ... src/camera.i
+	@echo ... src/camera.s
 	@echo ... src/cira.obj
 	@echo ... src/cira.i
 	@echo ... src/cira.s
+	@echo ... src/jpeg_encoder.obj
+	@echo ... src/jpeg_encoder.i
+	@echo ... src/jpeg_encoder.s
+	@echo ... src/ncnn_loader.obj
+	@echo ... src/ncnn_loader.i
+	@echo ... src/ncnn_loader.s
 	@echo ... src/onnx_loader.obj
 	@echo ... src/onnx_loader.i
 	@echo ... src/onnx_loader.s
@@ -405,15 +613,24 @@ help:
 	@echo ... src/signal_features.obj
 	@echo ... src/signal_features.i
 	@echo ... src/signal_features.s
+	@echo ... src/stream_server.obj
+	@echo ... src/stream_server.i
+	@echo ... src/stream_server.s
 	@echo ... src/yolo_decoder.obj
 	@echo ... src/yolo_decoder.i
 	@echo ... src/yolo_decoder.s
+	@echo ... test/test_ncnn.obj
+	@echo ... test/test_ncnn.i
+	@echo ... test/test_ncnn.s
 	@echo ... test/test_onnx.obj
 	@echo ... test/test_onnx.i
 	@echo ... test/test_onnx.s
 	@echo ... test/test_signal.obj
 	@echo ... test/test_signal.i
 	@echo ... test/test_signal.s
+	@echo ... test/test_stream.obj
+	@echo ... test/test_stream.i
+	@echo ... test/test_stream.s
 .PHONY : help
 
 

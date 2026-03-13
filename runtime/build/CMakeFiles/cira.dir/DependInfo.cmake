@@ -8,11 +8,16 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
+  "D:/CiRA Claw/cira-edge/runtime/src/annotator.c" "CMakeFiles/cira.dir/src/annotator.c.obj" "gcc" "CMakeFiles/cira.dir/src/annotator.c.obj.d"
   "D:/CiRA Claw/cira-edge/runtime/src/cira.c" "CMakeFiles/cira.dir/src/cira.c.obj" "gcc" "CMakeFiles/cira.dir/src/cira.c.obj.d"
   "D:/CiRA Claw/cira-edge/runtime/src/onnx_loader.c" "CMakeFiles/cira.dir/src/onnx_loader.c.obj" "gcc" "CMakeFiles/cira.dir/src/onnx_loader.c.obj.d"
   "D:/CiRA Claw/cira-edge/runtime/src/signal_buffer.c" "CMakeFiles/cira.dir/src/signal_buffer.c.obj" "gcc" "CMakeFiles/cira.dir/src/signal_buffer.c.obj.d"
   "D:/CiRA Claw/cira-edge/runtime/src/signal_features.c" "CMakeFiles/cira.dir/src/signal_features.c.obj" "gcc" "CMakeFiles/cira.dir/src/signal_features.c.obj.d"
+  "D:/CiRA Claw/cira-edge/runtime/src/stream_server.c" "CMakeFiles/cira.dir/src/stream_server.c.obj" "gcc" "CMakeFiles/cira.dir/src/stream_server.c.obj.d"
   "D:/CiRA Claw/cira-edge/runtime/src/yolo_decoder.c" "CMakeFiles/cira.dir/src/yolo_decoder.c.obj" "gcc" "CMakeFiles/cira.dir/src/yolo_decoder.c.obj.d"
+  "D:/CiRA Claw/cira-edge/runtime/src/camera.cpp" "CMakeFiles/cira.dir/src/camera.cpp.obj" "gcc" "CMakeFiles/cira.dir/src/camera.cpp.obj.d"
+  "D:/CiRA Claw/cira-edge/runtime/src/jpeg_encoder.cpp" "CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj" "gcc" "CMakeFiles/cira.dir/src/jpeg_encoder.cpp.obj.d"
+  "D:/CiRA Claw/cira-edge/runtime/src/ncnn_loader.cpp" "CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj" "gcc" "CMakeFiles/cira.dir/src/ncnn_loader.cpp.obj.d"
   )
 
 # Targets to which this target links which contain Fortran sources.
