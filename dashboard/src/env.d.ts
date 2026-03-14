@@ -5,6 +5,8 @@ declare module '@gateway/socket-registry' {
   export type SocketType =
     | 'vision.confidence'
     | 'vision.detection'
+    | 'signal.vibration'
+    | 'signal.anomaly'
     | 'signal.rate'
     | 'signal.threshold'
     | 'system.health'

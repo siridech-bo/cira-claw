@@ -150,10 +150,16 @@ Decision tree (apply in this order, first match wins):
 4. Code accesses payload.stats.fps, payload.stats.uptime_sec, or other numeric stats?
    → socket_type: "signal.threshold"
    → reads: list the specific paths accessed
-5. Code accesses payload.node.status or payload.frame.number?
+5. Code accesses payload.signals.<channel>.rms, .peak, .mean, or .window_ready?
+   → socket_type: "signal.vibration"
+   → reads: include the specific channel path (e.g., "signals.x_axis.rms")
+6. Code accesses payload.signal_prediction.label, .confidence, .is_anomaly, or .anomaly_score?
+   → socket_type: "signal.anomaly"
+   → reads: include the specific field (e.g., "signal_prediction.anomaly_score")
+7. Code accesses payload.node.status or payload.frame.number?
    → socket_type: "system.health"
    → reads: list the specific paths accessed
-6. None of the above, or code accesses multiple unrelated regions:
+8. None of the above, or code accesses multiple unrelated regions:
    → socket_type: "any.boolean"
    → reads: list all accessed paths
 
@@ -193,6 +199,63 @@ You CANNOT:
 - All logic synchronous — no Promise, no async, no setTimeout
 - Return value must be: { action: 'pass'|'reject'|'alert'|'log'|'modbus_write', ... }
 - Always include a default return { action: 'pass' } path
+
+### Example rules by socket type
+
+**signal.vibration** — Alert when sensor channel RMS exceeds threshold:
+\`\`\`javascript
+module.exports = function(payload) {
+  var signals = payload.signals;
+  if (!signals || !signals.x_axis) {
+    return { action: 'pass' };
+  }
+  if (signals.x_axis.rms > 2.5) {
+    return {
+      action: 'alert',
+      severity: 'warning',
+      message: 'X-axis vibration RMS exceeded threshold: ' + signals.x_axis.rms.toFixed(2)
+    };
+  }
+  return { action: 'pass' };
+};
+\`\`\`
+Metadata: socket_type="signal.vibration", reads=["signals.x_axis.rms"], produces=["pass","alert"]
+
+**signal.anomaly** — Reject when signal model detects anomaly with high confidence:
+\`\`\`javascript
+module.exports = function(payload) {
+  var pred = payload.signal_prediction;
+  if (!pred) {
+    return { action: 'pass' };
+  }
+  if (pred.is_anomaly && pred.confidence > 0.85) {
+    return {
+      action: 'reject',
+      reason: 'Signal anomaly detected: ' + pred.label + ' (confidence: ' + (pred.confidence * 100).toFixed(1) + '%)'
+    };
+  }
+  return { action: 'pass' };
+};
+\`\`\`
+Metadata: socket_type="signal.anomaly", reads=["signal_prediction.is_anomaly","signal_prediction.confidence","signal_prediction.label"], produces=["pass","reject"]
+
+**vision.detection** — Alert when defect count exceeds limit:
+\`\`\`javascript
+module.exports = function(payload) {
+  var defects = payload.detections.filter(function(d) {
+    return d.label === 'defect';
+  });
+  if (defects.length > 3) {
+    return {
+      action: 'alert',
+      severity: 'critical',
+      message: 'High defect count: ' + defects.length + ' defects in frame'
+    };
+  }
+  return { action: 'pass' };
+};
+\`\`\`
+Metadata: socket_type="vision.detection", reads=["detections[].label"], produces=["pass","alert"]
 
 ### When to use js_query vs js_rule_create
 Use js_query when: the operator wants a one-time answer about current data.

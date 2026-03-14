@@ -525,6 +525,7 @@ export class StatsCollector extends EventEmitter {
       label: string;
       confidence: number;
       is_anomaly: boolean;
+      anomaly_score: number;
       output_format: string;
     } | undefined = undefined;
 
@@ -548,6 +549,7 @@ export class StatsCollector extends EventEmitter {
               label: string;
               confidence: number;
               is_anomaly: boolean;
+              anomaly_score?: number;
               output_format: string;
             };
           };
@@ -567,7 +569,13 @@ export class StatsCollector extends EventEmitter {
 
           // Include prediction if present
           if (signalData.prediction) {
-            signal_prediction = signalData.prediction;
+            signal_prediction = {
+              label: signalData.prediction.label,
+              confidence: signalData.prediction.confidence,
+              is_anomaly: signalData.prediction.is_anomaly,
+              anomaly_score: signalData.prediction.anomaly_score ?? 0,
+              output_format: signalData.prediction.output_format,
+            };
           }
         }
       }

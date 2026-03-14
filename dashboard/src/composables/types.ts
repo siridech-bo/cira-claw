@@ -63,6 +63,16 @@ export const PAYLOAD_FIELDS = [
   { path: 'frame.width', label: 'Frame Width', type: 'signal.threshold' as SocketType },
   { path: 'frame.height', label: 'Frame Height', type: 'signal.threshold' as SocketType },
   { path: 'frame.number', label: 'Frame Number', type: 'system.health' as SocketType },
+  // Signal channel stats — signal.vibration
+  { path: 'signals.x_axis.rms', label: 'Signal: x_axis RMS', type: 'signal.vibration' as SocketType },
+  { path: 'signals.x_axis.peak', label: 'Signal: x_axis Peak', type: 'signal.vibration' as SocketType },
+  { path: 'signals.y_axis.rms', label: 'Signal: y_axis RMS', type: 'signal.vibration' as SocketType },
+  { path: 'signals.z_axis.rms', label: 'Signal: z_axis RMS', type: 'signal.vibration' as SocketType },
+  { path: 'signals.ch0.rms', label: 'Signal: ch0 RMS', type: 'signal.vibration' as SocketType },
+  // Signal inference results — signal.anomaly
+  { path: 'signal_prediction.confidence', label: 'Signal Prediction: Confidence', type: 'signal.anomaly' as SocketType },
+  { path: 'signal_prediction.is_anomaly', label: 'Signal Prediction: Is Anomaly', type: 'signal.anomaly' as SocketType },
+  { path: 'signal_prediction.anomaly_score', label: 'Signal Prediction: Score', type: 'signal.anomaly' as SocketType },
 ] as const;
 
 // ─── Node Types ──────────────────────────────────────────────────────────────

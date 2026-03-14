@@ -63,6 +63,7 @@ export interface RulePayload {
     label: string;
     confidence: number;
     is_anomaly: boolean;
+    anomaly_score: number;
     output_format: string;
   };
 }

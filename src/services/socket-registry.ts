@@ -18,6 +18,8 @@
 export const SOCKET_TYPES = [
   'vision.confidence',
   'vision.detection',
+  'signal.vibration',   // Physical sensor channel readings (rms, peak, mean)
+  'signal.anomaly',     // Signal model inference output
   'signal.rate',
   'signal.threshold',
   'system.health',
@@ -35,6 +37,8 @@ export type SocketType = typeof SOCKET_TYPES[number];
 export const SOCKET_TYPE_LABELS: Record<SocketType, string> = {
   'vision.confidence': 'Confidence Score',
   'vision.detection': 'Detection Count/Label',
+  'signal.vibration': 'Signal — Sensor Channel (RMS/Peak/Mean)',
+  'signal.anomaly': 'Signal — Anomaly / Classification Result',
   'signal.rate': 'Rate (per hour)',
   'signal.threshold': 'Threshold Value',
   'system.health': 'System Health',
@@ -47,6 +51,8 @@ export const SOCKET_TYPE_LABELS: Record<SocketType, string> = {
 export const SOCKET_TYPE_COLORS: Record<SocketType, string> = {
   'vision.confidence': '#F59E0B', // Amber
   'vision.detection': '#10B981',  // Emerald
+  'signal.vibration': '#FF6B35',  // Orange-red — physical sensor
+  'signal.anomaly': '#D946EF',    // Magenta — anomaly detection
   'signal.rate': '#8B5CF6',       // Purple
   'signal.threshold': '#3B82F6',  // Blue
   'system.health': '#EF4444',     // Red
@@ -97,6 +103,18 @@ export const PAYLOAD_FIELD_MAP: Record<string, SocketType> = {
   'node.id': 'system.health',
   'frame.number': 'system.health',
   'frame.timestamp': 'system.health',
+
+  // signal.vibration — physical sensor channel stats
+  'signals.*.rms': 'signal.vibration',
+  'signals.*.peak': 'signal.vibration',
+  'signals.*.mean': 'signal.vibration',
+  'signals.*.window_ready': 'signal.vibration',
+
+  // signal.anomaly — signal model inference results
+  'signal_prediction.label': 'signal.anomaly',
+  'signal_prediction.confidence': 'signal.anomaly',
+  'signal_prediction.is_anomaly': 'signal.anomaly',
+  'signal_prediction.anomaly_score': 'signal.anomaly',
 };
 
 // ─── Type Guards and Inference ────────────────────────────────────────────────
@@ -115,6 +133,8 @@ export function isValidSocketType(s: string): s is SocketType {
 const SOCKET_TYPE_PRIORITY: SocketType[] = [
   'vision.confidence',  // Most specific, wins over vision.detection
   'vision.detection',
+  'signal.vibration',   // Physical sensor data
+  'signal.anomaly',     // Signal model inference
   'signal.rate',
   'signal.threshold',
   'system.health',
@@ -201,6 +221,16 @@ function fieldMatchesPattern(field: string, pattern: string): boolean {
     return true;
   }
 
+  // Handle wildcard patterns (e.g., "signals.*.rms" matches "signals.x_axis.rms")
+  if (pattern.includes('.*')) {
+    const patternParts = pattern.split('.');
+    const fieldParts = field.split('.');
+    if (fieldParts.length === patternParts.length) {
+      const matches = patternParts.every((p, i) => p === '*' || p === fieldParts[i]);
+      if (matches) return true;
+    }
+  }
+
   // Check if pattern is a prefix of field with array access
   const fieldParts = field.split('.');
   const patternParts = pattern.split('.');
@@ -258,6 +288,18 @@ if (process.env.NODE_ENV === 'test') {
   assert(
     inferSocketType(['detections[].confidence', 'detections.length']) === 'vision.confidence',
     'confidence should win over detection (priority)'
+  );
+  assert(
+    inferSocketType(['signals.x_axis.rms']) === 'signal.vibration',
+    'signals.x_axis.rms should infer signal.vibration'
+  );
+  assert(
+    inferSocketType(['signal_prediction.is_anomaly']) === 'signal.anomaly',
+    'signal_prediction.is_anomaly should infer signal.anomaly'
+  );
+  assert(
+    inferSocketType(['signals.y_axis.peak', 'signal_prediction.label']) === 'signal.vibration',
+    'signal.vibration wins over signal.anomaly (priority)'
   );
 
   console.log('Socket registry tests passed');
