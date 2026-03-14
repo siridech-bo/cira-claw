@@ -132,8 +132,8 @@ async function fetchSlotInfo() {
 
     if (response.ok) {
       const data = await response.json();
-      // Find the SIGNAL slot from the slots array
-      const signalSlot = data.slots?.find((s: SlotInfo) => s.slot === 'SIGNAL');
+      // Find the signal slot from the slots array (runtime returns lowercase)
+      const signalSlot = data.slots?.find((s: SlotInfo) => s.slot === 'signal');
       slotInfo.value = signalSlot || null;
     } else {
       slotInfo.value = null;

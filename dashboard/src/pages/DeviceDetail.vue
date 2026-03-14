@@ -222,7 +222,7 @@ async function fetchSignalData() {
     const slotsRes = await fetch(`/api/nodes/${nodeId.value}/slots`);
     if (slotsRes.ok) {
       const data = await slotsRes.json();
-      const slot = data.slots?.find((s: SignalSlot) => s.slot === 'SIGNAL');
+      const slot = data.slots?.find((s: SignalSlot) => s.slot === 'signal');
       signalSlot.value = slot || null;
     }
 

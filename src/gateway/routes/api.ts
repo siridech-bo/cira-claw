@@ -115,8 +115,8 @@ export async function registerApiRoutes(
         clearTimeout(timeout);
 
         if (response.ok) {
-          const data = await response.json();
-          const signalSlot = data.slots?.find((s: { slot: string }) => s.slot === 'SIGNAL');
+          const data = await response.json() as { slots?: Array<{ slot: string; loaded: boolean; name: string | null }> };
+          const signalSlot = data.slots?.find((s) => s.slot === 'signal');
           return {
             id: node.id,
             signalSlot: signalSlot ? { loaded: signalSlot.loaded, name: signalSlot.name } : null
