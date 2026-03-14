@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import { getConfigLoader, ConfigLoader } from './config.js';
 import { createGatewayServer, GatewayServer } from './gateway/server.js';
-import { registerApiRoutes, setRuleEngine, setStatsCollector } from './gateway/routes/api.js';
+import { registerApiRoutes, setRuleEngine, setStatsCollector, setSignalBridge } from './gateway/routes/api.js';
 import { registerWebSocketRoutes, WebSocketHandler } from './gateway/websocket.js';
 import { registerChatRoutes } from './gateway/chat.js';
 import { getNodeManager, NodeManager } from './nodes/manager.js';
@@ -17,6 +17,7 @@ import { createRuleEngine, RuleEngine } from './services/rule-engine.js';
 import { createStateStore, StateStore } from './services/state-store.js';
 import { createCompositeRuleEngine, CompositeRuleEngine } from './services/composite-rule-engine.js';
 import { createActionRunner, ActionRunner } from './services/action-runner.js';
+import { createSignalBridgeService, SignalBridgeService } from './services/signal-bridge.js';
 import { createLogger, logger as rootLogger } from './utils/logger.js';
 import { CiraConfig } from './utils/config-schema.js';
 
@@ -36,6 +37,7 @@ let ruleEngine: RuleEngine | null = null;
 let stateStore: StateStore | null = null;
 let compositeRuleEngine: CompositeRuleEngine | null = null;
 let actionRunner: ActionRunner | null = null;
+let signalBridge: SignalBridgeService | null = null;
 let config: CiraConfig;
 let configPath: string | undefined;
 let isShuttingDown = false;
@@ -69,6 +71,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
     if (stateStore) {
       logger.debug('Closing state store...');
       stateStore.close();
+    }
+
+    // Stop signal bridge
+    if (signalBridge) {
+      logger.debug('Stopping signal bridge...');
+      await signalBridge.stop();
     }
 
     // Stop MODBUS server
@@ -351,6 +359,17 @@ async function main(): Promise<void> {
         logger.warn(`Failed to start MODBUS server: ${error}`);
         modbusServer = null;
       }
+    }
+
+    // Spec CX-1: Initialize signal protocol bridges
+    const signalBridgeConfigDir = path.join(os.homedir(), '.cira');
+    signalBridge = createSignalBridgeService(signalBridgeConfigDir, nodeManager, mqttChannel);
+    setSignalBridge(signalBridge);
+    try {
+      await signalBridge.start();
+    } catch (error) {
+      logger.warn(`Signal bridge failed to start: ${error}`);
+      signalBridge = null;
     }
 
     // Start health checks

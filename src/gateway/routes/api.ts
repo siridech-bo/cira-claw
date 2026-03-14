@@ -4,6 +4,7 @@ import { NodeConfig, NodeConfigSchema } from '../../utils/config-schema.js';
 import { RuleEngine, SavedRule } from '../../services/rule-engine.js';
 import { StatsCollector } from '../../services/stats-collector.js';
 import { CompositeRule } from '../../services/state-store.js';
+import { SignalBridgeService } from '../../services/signal-bridge.js';
 import { createLogger } from '../../utils/logger.js';
 import { randomUUID } from 'crypto';
 
@@ -42,6 +43,7 @@ const logger = createLogger('api-routes');
 // Module-level references for rules API
 let _ruleEngine: RuleEngine | null = null;
 let _statsCollector: StatsCollector | null = null;
+let _signalBridge: SignalBridgeService | null = null;
 
 export function setRuleEngine(engine: RuleEngine): void {
   _ruleEngine = engine;
@@ -49,6 +51,10 @@ export function setRuleEngine(engine: RuleEngine): void {
 
 export function setStatsCollector(collector: StatsCollector): void {
   _statsCollector = collector;
+}
+
+export function setSignalBridge(bridge: SignalBridgeService): void {
+  _signalBridge = bridge;
 }
 
 interface NodeParams {
@@ -488,6 +494,7 @@ export async function registerApiRoutes(
           error?: string;
           format?: string;
           model?: string;
+          slot?: string;
         };
 
         if (!response.ok || !data.success) {
@@ -497,7 +504,14 @@ export async function registerApiRoutes(
           });
         }
 
-        logger.info(`Model switched on node ${id}: ${path}`);
+        logger.info(`Model switched on node ${id}: ${path} (slot: ${data.slot || 'unknown'})`);
+
+        // Notify signal bridge if SIGNAL slot was loaded
+        if (data.slot === 'signal' && _signalBridge) {
+          _signalBridge.notifyModelChanged(id).catch((err) => {
+            logger.warn(`Failed to notify signal bridge: ${err}`);
+          });
+        }
 
         // Update inference status with new model name
         const status = nodeManager.getNodeStatus(id);
@@ -1338,6 +1352,137 @@ export async function registerApiRoutes(
       stateStore.clearAllStates(id);
       logger.info(`Composite rule ${id} state reset via API`);
       return { success: true, id, message: 'Stateful node state cleared' };
+    }
+  );
+
+  // =====================
+  // Signal Sources API (Spec CX-1)
+  // =====================
+
+  // GET /api/signal-sources — List all source statuses
+  fastify.get('/api/signal-sources', async (_request, reply) => {
+    if (!_signalBridge) {
+      return reply.status(503).send({
+        error: 'Signal bridge not available',
+      });
+    }
+
+    return { sources: _signalBridge.getAllStatuses() };
+  });
+
+  // POST /api/signal-sources — Add or update a source
+  fastify.post<{
+    Body: {
+      id: string;
+      enabled: boolean;
+      protocol: 'modbus_client' | 'mqtt_subscribe';
+      node_id: string;
+      batch_size?: number;
+      channels: Array<{ name: string; [key: string]: unknown }>;
+      // MODBUS-specific
+      host?: string;
+      port?: number;
+      poll_interval_ms?: number;
+      // MQTT-specific
+      topic?: string;
+      payload_format?: string;
+    };
+  }>('/api/signal-sources', async (request, reply) => {
+    if (!_signalBridge) {
+      return reply.status(503).send({
+        error: 'Signal bridge not available',
+      });
+    }
+
+    const body = request.body;
+
+    // Validate required fields
+    if (!body.id || !body.protocol || !body.node_id || !body.channels) {
+      return reply.status(400).send({
+        error: 'Missing required fields',
+        message: 'Required: id, protocol, node_id, channels',
+      });
+    }
+
+    // Validate channel count
+    if (body.channels.length > 16) {
+      return reply.status(400).send({
+        error: 'Too many channels',
+        message: 'Maximum 16 channels allowed per source',
+      });
+    }
+
+    // Validate protocol-specific fields
+    if (body.protocol === 'modbus_client') {
+      if (!body.host || !body.port) {
+        return reply.status(400).send({
+          error: 'Missing MODBUS fields',
+          message: 'MODBUS sources require host and port',
+        });
+      }
+    } else if (body.protocol === 'mqtt_subscribe') {
+      if (!body.topic) {
+        return reply.status(400).send({
+          error: 'Missing MQTT fields',
+          message: 'MQTT sources require topic',
+        });
+      }
+    }
+
+    // Save and reload
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    _signalBridge.upsertSource(body as any);
+    await _signalBridge.reload();
+
+    return { success: true, id: body.id };
+  });
+
+  // DELETE /api/signal-sources/:id — Remove a source
+  fastify.delete<{ Params: { id: string } }>(
+    '/api/signal-sources/:id',
+    async (request, reply) => {
+      if (!_signalBridge) {
+        return reply.status(503).send({
+          error: 'Signal bridge not available',
+        });
+      }
+
+      const { id } = request.params;
+      const removed = _signalBridge.removeSource(id);
+
+      if (!removed) {
+        return reply.status(404).send({
+          error: 'Source not found',
+          message: `Signal source with id '${id}' does not exist`,
+        });
+      }
+
+      await _signalBridge.reload();
+      return { success: true, id };
+    }
+  );
+
+  // POST /api/signal-sources/:id/test — Test connection and validate
+  fastify.post<{ Params: { id: string } }>(
+    '/api/signal-sources/:id/test',
+    async (request, reply) => {
+      if (!_signalBridge) {
+        return reply.status(503).send({
+          error: 'Signal bridge not available',
+        });
+      }
+
+      const { id } = request.params;
+      const result = await _signalBridge.testSource(id);
+
+      if (result.error === 'Source not found') {
+        return reply.status(404).send({
+          error: 'Source not found',
+          message: `Signal source with id '${id}' does not exist`,
+        });
+      }
+
+      return result;
     }
   );
 

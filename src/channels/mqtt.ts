@@ -24,12 +24,15 @@ export interface MqttCommand {
   reply_topic?: string;
 }
 
+export type MqttMessageCallback = (topic: string, payload: Buffer) => void;
+
 export class MqttChannel {
   private client: MqttClient | null = null;
   private config: MqttConfig;
   private agent: CiraAgent;
   private nodeManager: NodeManager;
   private connected = false;
+  private externalSubscriptions: Map<string, MqttMessageCallback[]> = new Map();
 
   constructor(config: MqttConfig, agent: CiraAgent, nodeManager: NodeManager) {
     this.config = config;
@@ -114,6 +117,20 @@ export class MqttChannel {
   private async handleMessage(topic: string, payload: Buffer): Promise<void> {
     logger.debug(`MQTT message on ${topic}: ${payload.toString()}`);
 
+    // Call external callbacks first (for signal bridge, etc.)
+    for (const [subscribedTopic, callbacks] of this.externalSubscriptions) {
+      // Simple topic matching (exact or wildcard)
+      if (this.topicMatches(subscribedTopic, topic)) {
+        for (const callback of callbacks) {
+          try {
+            callback(topic, payload);
+          } catch (err) {
+            logger.error(`External callback error for ${topic}: ${err}`);
+          }
+        }
+      }
+    }
+
     try {
       const message = JSON.parse(payload.toString()) as MqttCommand;
 
@@ -124,6 +141,24 @@ export class MqttChannel {
     } catch (error) {
       logger.error(`Failed to process MQTT message: ${error}`);
     }
+  }
+
+  /**
+   * Simple MQTT topic matching with wildcards.
+   */
+  private topicMatches(pattern: string, topic: string): boolean {
+    if (pattern === topic) return true;
+    if (pattern.endsWith('#')) {
+      const prefix = pattern.slice(0, -1);
+      return topic.startsWith(prefix);
+    }
+    if (pattern.includes('+')) {
+      const patternParts = pattern.split('/');
+      const topicParts = topic.split('/');
+      if (patternParts.length !== topicParts.length) return false;
+      return patternParts.every((p, i) => p === '+' || p === topicParts[i]);
+    }
+    return false;
   }
 
   private async handleCommand(topic: string, command: MqttCommand): Promise<void> {
@@ -252,6 +287,48 @@ export class MqttChannel {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /**
+   * Subscribe to a topic with an external callback.
+   * Used by SignalBridgeService for sensor data topics.
+   */
+  subscribe(topic: string, callback: MqttMessageCallback): void {
+    if (!this.client || !this.connected) {
+      logger.warn(`Cannot subscribe to ${topic}: not connected`);
+      return;
+    }
+
+    // Add callback to our map
+    if (!this.externalSubscriptions.has(topic)) {
+      this.externalSubscriptions.set(topic, []);
+    }
+    this.externalSubscriptions.get(topic)!.push(callback);
+
+    // Subscribe via MQTT client
+    this.client.subscribe(topic, (err) => {
+      if (err) {
+        logger.error(`Failed to subscribe to ${topic}: ${err}`);
+      } else {
+        logger.debug(`Subscribed to external topic: ${topic}`);
+      }
+    });
+  }
+
+  /**
+   * Unsubscribe from a topic.
+   */
+  unsubscribe(topic: string): void {
+    if (!this.client) return;
+
+    this.externalSubscriptions.delete(topic);
+    this.client.unsubscribe(topic, (err) => {
+      if (err) {
+        logger.error(`Failed to unsubscribe from ${topic}: ${err}`);
+      } else {
+        logger.debug(`Unsubscribed from: ${topic}`);
+      }
+    });
   }
 }
 

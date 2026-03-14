@@ -513,6 +513,49 @@ static int handle_signal_result(struct MHD_Connection* conn, cira_ctx* ctx) {
 }
 
 /**
+ * Handle /api/signal/channels endpoint - returns signal model channel info.
+ * Used by gateway bridge to validate source channel names against loaded model.
+ */
+static int handle_signal_channels(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char response[2048];
+
+    if (!ctx->signal_buffer) {
+        /* No signal model loaded */
+        snprintf(response, sizeof(response),
+                 "{\"loaded\":false,\"channels\":[]}");
+    } else {
+        signal_buffer_t* buf = (signal_buffer_t*)ctx->signal_buffer;
+        char* p = response;
+        char* end = response + sizeof(response) - 128;
+
+        p += snprintf(p, end - p,
+                      "{\"loaded\":true,\"channels\":[");
+
+        for (int i = 0; i < buf->num_channels && p < end - 80; i++) {
+            if (i > 0) {
+                *p++ = ',';
+            }
+            p += snprintf(p, end - p, "\"%s\"", buf->channels[i].name);
+        }
+
+        p += snprintf(p, end - p,
+                      "],\"num_channels\":%d,\"window_size\":%d,\"sample_rate_hz\":%.1f}",
+                      buf->num_channels, buf->window_size, buf->sample_rate_hz);
+    }
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
  * Handle /api/stats endpoint - cumulative statistics since startup.
  */
 static int handle_stats(struct MHD_Connection* conn, cira_ctx* ctx) {
@@ -2176,6 +2219,9 @@ static enum MHD_Result request_handler(
     }
     if (strcmp(url, "/api/signal/result") == 0) {
         return handle_signal_result(conn, ctx);
+    }
+    if (strcmp(url, "/api/signal/channels") == 0) {
+        return handle_signal_channels(conn, ctx);
     }
     if (strcmp(url, "/api/stats") == 0) {
         return handle_stats(conn, ctx);

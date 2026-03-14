@@ -1,0 +1,32 @@
+{
+  "sources": [
+    {
+      "id": "plc-vibration",
+      "enabled": true,
+      "protocol": "modbus_client",
+      "host": "192.168.1.50",
+      "port": 502,
+      "poll_interval_ms": 10,
+      "batch_size": 64,
+      "node_id": "jetson-line1",
+      "channels": [
+        { "name": "x_axis", "register": 100, "scale": 0.001, "offset": 0.0 },
+        { "name": "y_axis", "register": 101, "scale": 0.001, "offset": 0.0 },
+        { "name": "z_axis", "register": 102, "scale": 0.001, "offset": 0.0 }
+      ]
+    },
+    {
+      "id": "mqtt-current",
+      "enabled": true,
+      "protocol": "mqtt_subscribe",
+      "topic": "factory/line1/motor_current",
+      "payload_format": "json",
+      "node_id": "jetson-line1",
+      "batch_size": 64,
+      "channels": [
+        { "name": "phase_a", "json_path": "phase_a" },
+        { "name": "phase_b", "json_path": "phase_b" }
+      ]
+    }
+  ]
+}
