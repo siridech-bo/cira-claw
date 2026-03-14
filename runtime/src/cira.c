@@ -499,19 +499,20 @@ static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
         char* output_obj = json_extract_object(json, "output");
         strcpy(ctx->signal_output_format, "label_prob");  /* default */
         ctx->signal_anomaly_threshold = 0.5f;              /* default */
+        ctx->signal_num_labels = 0;                        /* default */
 
         if (output_obj) {
             json_get_string(output_obj, "format", ctx->signal_output_format,
                            sizeof(ctx->signal_output_format));
             json_get_float(output_obj, "anomaly_threshold", &ctx->signal_anomaly_threshold);
-            free(output_obj);
-        }
 
-        /* --- Parse signal class labels --- */
-        ctx->signal_num_labels = json_get_string_array(json, "labels",
-                                                        ctx->signal_labels, CIRA_MAX_LABELS);
-        if (ctx->signal_num_labels > 0) {
-            fprintf(stderr, "Signal labels loaded: %d classes\n", ctx->signal_num_labels);
+            /* Parse class labels from output.classes (CiRA ME schema) */
+            ctx->signal_num_labels = json_get_string_array(output_obj, "classes",
+                                                            ctx->signal_labels, CIRA_MAX_LABELS);
+            if (ctx->signal_num_labels > 0) {
+                fprintf(stderr, "Signal labels loaded: %d classes\n", ctx->signal_num_labels);
+            }
+            free(output_obj);
         }
 
         /* --- Create signal buffer --- */
@@ -778,59 +779,48 @@ void cira_destroy(cira_ctx* ctx) {
 #endif
     }
 
-    /* Unload all model slots */
+    /* Unload all model slots - point legacy fields at each slot before calling unload */
     for (int slot = 0; slot < MODEL_SLOT_COUNT; slot++) {
+        if (ctx->formats[slot] == CIRA_FORMAT_UNKNOWN || ctx->model_handles[slot] == NULL) {
+            continue;
+        }
+
+        /* Point legacy fields at this slot for unload functions */
+        ctx->format = ctx->formats[slot];
+        ctx->model_handle = ctx->model_handles[slot];
+
         switch (ctx->formats[slot]) {
 #ifdef CIRA_DARKNET_ENABLED
             case CIRA_FORMAT_DARKNET:
-                /* Note: Darknet unload would need slot parameter */
+                darknet_unload(ctx);
                 break;
 #endif
 #ifdef CIRA_ONNX_ENABLED
             case CIRA_FORMAT_ONNX:
-                /* Note: ONNX unload would need slot parameter */
+                onnx_unload(ctx);
                 break;
 #endif
 #ifdef CIRA_TRT_ENABLED
             case CIRA_FORMAT_TENSORRT:
-                /* Note: TensorRT unload would need slot parameter */
+                trt_unload(ctx);
                 break;
 #endif
 #ifdef CIRA_NCNN_ENABLED
             case CIRA_FORMAT_NCNN:
-                /* Note: NCNN unload would need slot parameter */
+                ncnn_unload(ctx);
                 break;
 #endif
             default:
                 break;
         }
+
+        ctx->formats[slot] = CIRA_FORMAT_UNKNOWN;
+        ctx->model_handles[slot] = NULL;
     }
 
-    /* Also unload legacy model slot for backward compatibility */
-    switch (ctx->format) {
-#ifdef CIRA_DARKNET_ENABLED
-        case CIRA_FORMAT_DARKNET:
-            darknet_unload(ctx);
-            break;
-#endif
-#ifdef CIRA_ONNX_ENABLED
-        case CIRA_FORMAT_ONNX:
-            onnx_unload(ctx);
-            break;
-#endif
-#ifdef CIRA_TRT_ENABLED
-        case CIRA_FORMAT_TENSORRT:
-            trt_unload(ctx);
-            break;
-#endif
-#ifdef CIRA_NCNN_ENABLED
-        case CIRA_FORMAT_NCNN:
-            ncnn_unload(ctx);
-            break;
-#endif
-        default:
-            break;
-    }
+    /* Clear legacy fields */
+    ctx->format = CIRA_FORMAT_UNKNOWN;
+    ctx->model_handle = NULL;
 
     if (ctx->frame_buffer) {
         free(ctx->frame_buffer);

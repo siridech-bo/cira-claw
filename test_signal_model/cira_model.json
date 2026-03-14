@@ -71,12 +71,12 @@
     ]
   },
   "output": {
-    "format": "label_prob"
+    "format": "label_prob",
+    "classes": [
+      "Normal",
+      "Fault_A",
+      "Fault_B"
+    ]
   },
-  "num_classes": 3,
-  "labels": [
-    "Normal",
-    "Fault_A",
-    "Fault_B"
-  ]
+  "num_classes": 3
 }
