@@ -95,7 +95,9 @@ struct cira_ctx {
     /* Results */
     cira_detection_t detections[CIRA_MAX_DETECTIONS];
     int num_detections;
-    char result_json[CIRA_MAX_JSON_LEN];
+    char result_json[CIRA_MAX_JSON_LEN];         /* Image detection results */
+    char signal_result_json[CIRA_MAX_JSON_LEN];  /* Signal prediction results - persistent */
+    int signal_result_valid;                      /* 1 if signal prediction has completed */
 
     /* Detection persistence (for smooth annotations) */
     cira_detection_t prev_detections[CIRA_MAX_DETECTIONS];

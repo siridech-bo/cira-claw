@@ -902,6 +902,11 @@ static int parse_signal_output(cira_ctx* ctx,
         p += snprintf(p, end - p, "]}");
     }
 
+    /* Copy to persistent signal result buffer */
+    strncpy(ctx->signal_result_json, ctx->result_json, CIRA_MAX_JSON_LEN - 1);
+    ctx->signal_result_json[CIRA_MAX_JSON_LEN - 1] = '\0';
+    ctx->signal_result_valid = 1;
+
     return CIRA_OK;
 }
 

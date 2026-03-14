@@ -734,6 +734,8 @@ cira_ctx* cira_create(void) {
 
     /* Initialize empty result JSON */
     strcpy(ctx->result_json, "{\"detections\":[],\"count\":0}");
+    strcpy(ctx->signal_result_json, "{\"status\":\"no_prediction_yet\"}");
+    ctx->signal_result_valid = 0;
 
     /* Initialize cumulative statistics */
     ctx->total_detections = 0;
@@ -884,12 +886,45 @@ int cira_load_slot(cira_ctx* ctx, const char* config_path, model_slot_t slot) {
     pthread_mutex_lock(&ctx->model_slot_mutexes[slot]);
 
     /* If slot already has a model, unload it first */
-    if (ctx->formats[slot] != CIRA_FORMAT_UNKNOWN) {
-        fprintf(stderr, "Unloading previous model from slot %d...\n", slot);
-        /* TODO: Need slot-aware unload functions */
-        /* For now, just clear the slot */
+    if (ctx->formats[slot] != CIRA_FORMAT_UNKNOWN && ctx->model_handles[slot] != NULL) {
+        cira_format_t old_format = ctx->formats[slot];
+        void* old_handle = ctx->model_handles[slot];
+
+        fprintf(stderr, "Unloading previous model from slot %d (format=%d)...\n", slot, old_format);
+
+        /* Temporarily point legacy fields at slot's model for unload functions */
+        ctx->format = old_format;
+        ctx->model_handle = old_handle;
+
+        /* Call appropriate unload function */
+        switch (old_format) {
+#ifdef CIRA_ONNX_ENABLED
+            case CIRA_FORMAT_ONNX:
+                onnx_unload(ctx);
+                break;
+#endif
+#ifdef CIRA_NCNN_ENABLED
+            case CIRA_FORMAT_NCNN:
+                ncnn_unload(ctx);
+                break;
+#endif
+#ifdef CIRA_DARKNET_ENABLED
+            case CIRA_FORMAT_DARKNET:
+                darknet_unload(ctx);
+                break;
+#endif
+            default:
+                /* TensorRT or unknown - just clear */
+                break;
+        }
+
+        /* Clear the slot */
         ctx->formats[slot] = CIRA_FORMAT_UNKNOWN;
         ctx->model_handles[slot] = NULL;
+        ctx->model_paths[slot][0] = '\0';
+        ctx->model_names[slot][0] = '\0';
+
+        fprintf(stderr, "Unloaded previous model from slot %d\n", slot);
     }
 
     /* Unlock slot mutex - we'll re-lock it after loading */

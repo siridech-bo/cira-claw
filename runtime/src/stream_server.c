@@ -470,7 +470,7 @@ static int handle_health(struct MHD_Connection* conn, cira_ctx* ctx) {
 }
 
 /**
- * Handle /api/results endpoint.
+ * Handle /api/results endpoint - returns IMAGE detection results.
  */
 static int handle_results(struct MHD_Connection* conn, cira_ctx* ctx) {
     const char* json = cira_result_json(ctx);
@@ -478,6 +478,30 @@ static int handle_results(struct MHD_Connection* conn, cira_ctx* ctx) {
 
     struct MHD_Response* response = MHD_create_response_from_buffer(
         len, (void*)json, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(response, "Content-Type", CT_JSON);
+    MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
+    MHD_destroy_response(response);
+
+    return ret;
+}
+
+/**
+ * Handle /api/signal/result endpoint - returns last SIGNAL prediction result.
+ * This persists across camera frames (not overwritten by image inference).
+ */
+static int handle_signal_result(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char json[CIRA_MAX_JSON_LEN];
+
+    pthread_mutex_lock(&ctx->result_mutex);
+    strncpy(json, ctx->signal_result_json, sizeof(json) - 1);
+    json[sizeof(json) - 1] = '\0';
+    pthread_mutex_unlock(&ctx->result_mutex);
+
+    struct MHD_Response* response = MHD_create_response_from_buffer(
+        strlen(json), json, MHD_RESPMEM_MUST_COPY);
 
     MHD_add_response_header(response, "Content-Type", CT_JSON);
     MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
@@ -997,6 +1021,8 @@ static int handle_model_load(struct MHD_Connection* conn, cira_ctx* ctx,
     /* Determine which slot to use */
     int result;
     const char* slot_name = "auto";
+    model_slot_t loaded_slot = MODEL_SLOT_IMAGE;  /* Track which slot was loaded */
+
     if (slot_str[0] != '\0') {
         /* Explicit slot specified */
         model_slot_t slot;
@@ -1020,15 +1046,31 @@ static int handle_model_load(struct MHD_Connection* conn, cira_ctx* ctx,
         }
         fprintf(stderr, "Loading model into %s slot: %s\n", slot_name, model_path);
         result = cira_load_slot(ctx, model_path, slot);
+        loaded_slot = slot;
     } else {
         /* Auto-detect slot from manifest */
         fprintf(stderr, "Loading model (auto-detect slot): %s\n", model_path);
         result = cira_load(ctx, model_path);
+        /* cira_load auto-detects slot - check which one was populated */
+        if (result == CIRA_OK) {
+            /* Check if signal slot was just loaded by looking at signal buffer */
+            if (ctx->signal_buffer != NULL && SLOT_FORMAT(ctx, MODEL_SLOT_SIGNAL) != CIRA_FORMAT_UNKNOWN) {
+                loaded_slot = MODEL_SLOT_SIGNAL;
+                slot_name = "signal";
+            } else {
+                loaded_slot = MODEL_SLOT_IMAGE;
+                slot_name = "image";
+            }
+        }
     }
 
     if (result == CIRA_OK) {
-        const char* fmt = ctx->format == CIRA_FORMAT_ONNX ? "onnx" :
-                          ctx->format == CIRA_FORMAT_NCNN ? "ncnn" : "unknown";
+        /* Read format from the actual slot that was loaded */
+        cira_format_t loaded_format = SLOT_FORMAT(ctx, loaded_slot);
+        const char* fmt = loaded_format == CIRA_FORMAT_ONNX    ? "onnx"    :
+                          loaded_format == CIRA_FORMAT_NCNN    ? "ncnn"    :
+                          loaded_format == CIRA_FORMAT_DARKNET ? "darknet" :
+                          loaded_format == CIRA_FORMAT_TENSORRT? "tensorrt": "unknown";
         snprintf(response, sizeof(response),
                 "{\"success\":true,\"model\":\"%.500s\",\"slot\":\"%s\",\"format\":\"%s\"}",
                 model_path, slot_name, fmt);
@@ -2131,6 +2173,9 @@ static enum MHD_Result request_handler(
     }
     if (strcmp(url, "/api/results") == 0) {
         return handle_results(conn, ctx);
+    }
+    if (strcmp(url, "/api/signal/result") == 0) {
+        return handle_signal_result(conn, ctx);
     }
     if (strcmp(url, "/api/stats") == 0) {
         return handle_stats(conn, ctx);

@@ -529,9 +529,37 @@ void signal_compute_features(
 int signal_feature_index(const char* name) {
     if (!name) return -1;
 
+    /* Try exact match first */
     for (int i = 0; i < 46; i++) {
         if (strcmp(name, FEATURE_NAMES[i]) == 0) {
             return i;
+        }
+    }
+
+    /* If exact match failed, try stripping channel suffix (e.g., "_ch0", "_ch1") */
+    /* Find the last underscore */
+    const char* last_underscore = strrchr(name, '_');
+    if (last_underscore && last_underscore > name) {
+        /* Check if suffix looks like a channel identifier (ch0, ch1, x_axis, etc.) */
+        const char* suffix = last_underscore + 1;
+        /* Only strip if suffix starts with "ch" followed by digit, or is axis-like */
+        if ((suffix[0] == 'c' && suffix[1] == 'h' && suffix[2] >= '0' && suffix[2] <= '9') ||
+            strcmp(suffix, "x_axis") == 0 || strcmp(suffix, "y_axis") == 0 || strcmp(suffix, "z_axis") == 0) {
+
+            /* Create stripped name */
+            size_t base_len = last_underscore - name;
+            char stripped[128];
+            if (base_len < sizeof(stripped)) {
+                strncpy(stripped, name, base_len);
+                stripped[base_len] = '\0';
+
+                /* Try matching stripped name */
+                for (int i = 0; i < 46; i++) {
+                    if (strcmp(stripped, FEATURE_NAMES[i]) == 0) {
+                        return i;
+                    }
+                }
+            }
         }
     }
 
