@@ -447,8 +447,8 @@ void onnx_unload(cira_ctx* ctx) {
  * @return CIRA_OK on success
  */
 int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels) {
-    if (!ctx || !ctx->model_handle || !data) {
-        cira_set_error(ctx, "Invalid parameters to onnx_predict");
+    if (!ctx || !SLOT_HANDLE(ctx, MODEL_SLOT_IMAGE) || !data) {
+        cira_set_error(ctx, "Invalid parameters to onnx_predict (no IMAGE slot model loaded)");
         return CIRA_ERROR_INPUT;
     }
 
@@ -457,7 +457,8 @@ int onnx_predict(cira_ctx* ctx, const uint8_t* data, int w, int h, int channels)
         return CIRA_ERROR_INPUT;
     }
 
-    onnx_model_t* model = (onnx_model_t*)ctx->model_handle;
+    /* Always use IMAGE slot for image prediction */
+    onnx_model_t* model = (onnx_model_t*)SLOT_HANDLE(ctx, MODEL_SLOT_IMAGE);
 
     /* Clear previous detections */
     cira_clear_detections(ctx);
@@ -914,12 +915,15 @@ static int parse_signal_output(cira_ctx* ctx,
  * @return CIRA_OK on success
  */
 int onnx_predict_tensor(cira_ctx* ctx, const float* tensor, int size) {
-    if (!ctx || !ctx->model_handle || !tensor) {
-        cira_set_error(ctx, "Invalid parameters to onnx_predict_tensor");
+    fprintf(stderr, "[DEBUG] onnx_predict_tensor called with size=%d\n", size);
+
+    if (!ctx || !SLOT_HANDLE(ctx, MODEL_SLOT_SIGNAL) || !tensor) {
+        cira_set_error(ctx, "Invalid parameters to onnx_predict_tensor (no SIGNAL slot model loaded)");
         return CIRA_ERROR_INPUT;
     }
 
-    onnx_model_t* model = (onnx_model_t*)ctx->model_handle;
+    /* Always use SIGNAL slot for signal prediction */
+    onnx_model_t* model = (onnx_model_t*)SLOT_HANDLE(ctx, MODEL_SLOT_SIGNAL);
 
     OrtStatus* status = NULL;
 
@@ -927,6 +931,9 @@ int onnx_predict_tensor(cira_ctx* ctx, const float* tensor, int size) {
     /* Assume 2D shape: [1, num_features] */
     int64_t input_shape[2] = {1, size};
     OrtValue* input_tensor = NULL;
+
+    fprintf(stderr, "[DEBUG] Creating rank 2 tensor with shape [%lld, %lld]\n",
+            (long long)input_shape[0], (long long)input_shape[1]);
 
     status = g_ort->CreateTensorWithDataAsOrtValue(
         model->memory_info,

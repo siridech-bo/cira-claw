@@ -58,11 +58,19 @@ struct cira_ctx {
     int status;
     char error_msg[CIRA_MAX_ERROR_LEN];
 
-    /* Model info */
-    cira_format_t format;
-    char model_path[1024];
-    char model_name[256];           /* Human-readable model name from manifest */
-    void* model_handle;             /* Format-specific model data */
+    /* Model slots (dual-model support) */
+    cira_format_t formats[MODEL_SLOT_COUNT];
+    char model_paths[MODEL_SLOT_COUNT][1024];
+    char model_names[MODEL_SLOT_COUNT][256];
+    void* model_handles[MODEL_SLOT_COUNT];  /* Format-specific model data */
+    pthread_mutex_t model_slot_mutexes[MODEL_SLOT_COUNT];  /* Per-slot locking */
+
+    /* Legacy single-model fields (for backward compatibility) */
+    /* These map to image slot (MODEL_SLOT_IMAGE) */
+    cira_format_t format;           /* Alias for formats[MODEL_SLOT_IMAGE] */
+    char model_path[1024];          /* Alias for model_paths[MODEL_SLOT_IMAGE] */
+    char model_name[256];           /* Alias for model_names[MODEL_SLOT_IMAGE] */
+    void* model_handle;             /* Alias for model_handles[MODEL_SLOT_IMAGE] */
 
     /* Labels */
     char labels[CIRA_MAX_LABELS][CIRA_MAX_LABEL_LEN];
@@ -175,6 +183,21 @@ void cira_store_frame(cira_ctx* ctx, const uint8_t* data, int w, int h);
  * Returns pointer to internal buffer - do not free.
  */
 const uint8_t* cira_get_frame(cira_ctx* ctx, int* w, int* h);
+
+/**
+ * Synchronize legacy single-model fields with model slot arrays.
+ * Call this after modifying slot arrays to update backward-compatible pointers.
+ *
+ * @param ctx Context handle
+ */
+void cira_sync_legacy_fields(cira_ctx* ctx);
+
+/* Helper macros for slot access */
+#define SLOT_FORMAT(ctx, slot) ((ctx)->formats[(slot)])
+#define SLOT_HANDLE(ctx, slot) ((ctx)->model_handles[(slot)])
+#define SLOT_PATH(ctx, slot) ((ctx)->model_paths[(slot)])
+#define SLOT_NAME(ctx, slot) ((ctx)->model_names[(slot)])
+#define SLOT_MUTEX(ctx, slot) ((ctx)->model_slot_mutexes[(slot)])
 
 #ifdef __cplusplus
 }

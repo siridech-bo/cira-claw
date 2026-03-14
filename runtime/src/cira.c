@@ -535,24 +535,79 @@ static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
         }
 
     } else {
-        /* Image model - parse flat signal fields for backward compatibility */
-        ctx->signal_num_selected = json_get_string_array(json, "signal_selected_features",
-                                                          ctx->signal_selected_features, 256);
+        /* Image model - only parse signal fields if no signal config exists yet */
+        /* This preserves signal config when loading image model after signal model */
+        if (ctx->signal_num_selected == 0) {
+            ctx->signal_num_selected = json_get_string_array(json, "signal_selected_features",
+                                                              ctx->signal_selected_features, 256);
 
-        if (json_get_string(json, "signal_output_format", ctx->signal_output_format,
-                            sizeof(ctx->signal_output_format))) {
-            /* parsed */
-        } else {
-            strcpy(ctx->signal_output_format, "label_prob");
-        }
+            if (json_get_string(json, "signal_output_format", ctx->signal_output_format,
+                                sizeof(ctx->signal_output_format))) {
+                /* parsed */
+            } else {
+                strcpy(ctx->signal_output_format, "label_prob");
+            }
 
-        float anomaly_thresh = 0;
-        if (json_get_float(json, "signal_anomaly_threshold", &anomaly_thresh) && anomaly_thresh > 0) {
-            ctx->signal_anomaly_threshold = anomaly_thresh;
-        } else {
-            ctx->signal_anomaly_threshold = 0.5f;
+            float anomaly_thresh = 0;
+            if (json_get_float(json, "signal_anomaly_threshold", &anomaly_thresh) && anomaly_thresh > 0) {
+                ctx->signal_anomaly_threshold = anomaly_thresh;
+            } else {
+                ctx->signal_anomaly_threshold = 0.5f;
+            }
         }
     }
+
+    free(json);
+    return 1;
+}
+
+/* Detect input_type from manifest file */
+static int detect_input_type_from_manifest(const char* config_path, char* input_type, size_t input_type_size) {
+    if (!is_directory(config_path)) {
+        /* Not a directory, default to image */
+        strncpy(input_type, "image", input_type_size - 1);
+        input_type[input_type_size - 1] = '\0';
+        return 1;
+    }
+
+    char manifest_path[1024];
+    snprintf(manifest_path, sizeof(manifest_path), "%s/cira_model.json", config_path);
+
+    if (!file_exists(manifest_path)) {
+        /* No manifest, default to image */
+        strncpy(input_type, "image", input_type_size - 1);
+        input_type[input_type_size - 1] = '\0';
+        return 1;
+    }
+
+    /* Read manifest file */
+    FILE* f = fopen(manifest_path, "r");
+    if (!f) {
+        strncpy(input_type, "image", input_type_size - 1);
+        input_type[input_type_size - 1] = '\0';
+        return 0;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char* json = (char*)malloc(size + 1);
+    if (!json) {
+        fclose(f);
+        strncpy(input_type, "image", input_type_size - 1);
+        input_type[input_type_size - 1] = '\0';
+        return 0;
+    }
+
+    fread(json, 1, size, f);
+    json[size] = '\0';
+    fclose(f);
+
+    /* Extract input_type */
+    strncpy(input_type, "image", input_type_size - 1);
+    input_type[input_type_size - 1] = '\0';
+    json_get_string(json, "input_type", input_type, input_type_size);
 
     free(json);
     return 1;
@@ -646,7 +701,22 @@ cira_ctx* cira_create(void) {
     if (!ctx) return NULL;
 
     ctx->status = CIRA_STATUS_READY;
+
+    /* Initialize model slots */
+    for (int i = 0; i < MODEL_SLOT_COUNT; i++) {
+        ctx->formats[i] = CIRA_FORMAT_UNKNOWN;
+        ctx->model_handles[i] = NULL;
+        ctx->model_paths[i][0] = '\0';
+        ctx->model_names[i][0] = '\0';
+        pthread_mutex_init(&ctx->model_slot_mutexes[i], NULL);
+    }
+
+    /* Initialize legacy fields (backward compatibility - map to image slot) */
     ctx->format = CIRA_FORMAT_UNKNOWN;
+    ctx->model_handle = NULL;
+    ctx->model_path[0] = '\0';
+    ctx->model_name[0] = '\0';
+
     ctx->confidence_threshold = 0.5f;
     ctx->nms_threshold = 0.4f;
     ctx->yolo_version = YOLO_VERSION_AUTO;
@@ -695,7 +765,35 @@ void cira_destroy(cira_ctx* ctx) {
 #endif
     }
 
-    /* Unload model */
+    /* Unload all model slots */
+    for (int slot = 0; slot < MODEL_SLOT_COUNT; slot++) {
+        switch (ctx->formats[slot]) {
+#ifdef CIRA_DARKNET_ENABLED
+            case CIRA_FORMAT_DARKNET:
+                /* Note: Darknet unload would need slot parameter */
+                break;
+#endif
+#ifdef CIRA_ONNX_ENABLED
+            case CIRA_FORMAT_ONNX:
+                /* Note: ONNX unload would need slot parameter */
+                break;
+#endif
+#ifdef CIRA_TRT_ENABLED
+            case CIRA_FORMAT_TENSORRT:
+                /* Note: TensorRT unload would need slot parameter */
+                break;
+#endif
+#ifdef CIRA_NCNN_ENABLED
+            case CIRA_FORMAT_NCNN:
+                /* Note: NCNN unload would need slot parameter */
+                break;
+#endif
+            default:
+                break;
+        }
+    }
+
+    /* Also unload legacy model slot for backward compatibility */
     switch (ctx->format) {
 #ifdef CIRA_DARKNET_ENABLED
         case CIRA_FORMAT_DARKNET:
@@ -731,6 +829,11 @@ void cira_destroy(cira_ctx* ctx) {
         ctx->signal_buffer = NULL;
     }
 
+    /* Destroy per-slot mutexes */
+    for (int i = 0; i < MODEL_SLOT_COUNT; i++) {
+        pthread_mutex_destroy(&ctx->model_slot_mutexes[i]);
+    }
+
     pthread_mutex_destroy(&ctx->result_mutex);
     pthread_mutex_destroy(&ctx->frame_mutex);
     pthread_mutex_destroy(&ctx->model_mutex);
@@ -744,65 +847,79 @@ void cira_destroy(cira_ctx* ctx) {
     free(ctx);
 }
 
-int cira_load(cira_ctx* ctx, const char* config_path) {
+void cira_sync_legacy_fields(cira_ctx* ctx) {
+    if (!ctx) return;
+
+    /* Sync legacy fields to image slot (MODEL_SLOT_IMAGE = 0) */
+    ctx->format = ctx->formats[MODEL_SLOT_IMAGE];
+    ctx->model_handle = ctx->model_handles[MODEL_SLOT_IMAGE];
+
+    /* Copy strings */
+    strncpy(ctx->model_path, ctx->model_paths[MODEL_SLOT_IMAGE], sizeof(ctx->model_path) - 1);
+    ctx->model_path[sizeof(ctx->model_path) - 1] = '\0';
+
+    strncpy(ctx->model_name, ctx->model_names[MODEL_SLOT_IMAGE], sizeof(ctx->model_name) - 1);
+    ctx->model_name[sizeof(ctx->model_name) - 1] = '\0';
+}
+
+int cira_load_slot(cira_ctx* ctx, const char* config_path, model_slot_t slot) {
     if (!ctx || !config_path) return CIRA_ERROR_INPUT;
+    if (slot < 0 || slot >= MODEL_SLOT_COUNT) {
+        cira_set_error(ctx, "Invalid model slot: %d", slot);
+        return CIRA_ERROR_INPUT;
+    }
+
+    fprintf(stderr, "Loading model into slot %d (%s)...\n", slot,
+            slot == MODEL_SLOT_IMAGE ? "image" : "signal");
 
     ctx->status = CIRA_STATUS_LOADING;
 
     /* Signal that model swap is in progress (camera thread will pause inference) */
     ctx->model_swapping = 1;
 
-    /* Lock model mutex to wait for any in-progress inference to complete */
+    /* Lock global model mutex to prevent conflicts */
     pthread_mutex_lock(&ctx->model_mutex);
 
-    /* If already loaded, unload first */
-    if (ctx->format != CIRA_FORMAT_UNKNOWN) {
-        fprintf(stderr, "Unloading previous model before loading new one...\n");
-        switch (ctx->format) {
-#ifdef CIRA_DARKNET_ENABLED
-            case CIRA_FORMAT_DARKNET:
-                darknet_unload(ctx);
-                break;
-#endif
-#ifdef CIRA_ONNX_ENABLED
-            case CIRA_FORMAT_ONNX:
-                onnx_unload(ctx);
-                break;
-#endif
-#ifdef CIRA_TRT_ENABLED
-            case CIRA_FORMAT_TENSORRT:
-                trt_unload(ctx);
-                break;
-#endif
-#ifdef CIRA_NCNN_ENABLED
-            case CIRA_FORMAT_NCNN:
-                ncnn_unload(ctx);
-                break;
-#endif
-            default:
-                break;
-        }
-        ctx->format = CIRA_FORMAT_UNKNOWN;
-        ctx->model_handle = NULL;
+    /* Lock the specific slot mutex */
+    pthread_mutex_lock(&ctx->model_slot_mutexes[slot]);
+
+    /* If slot already has a model, unload it first */
+    if (ctx->formats[slot] != CIRA_FORMAT_UNKNOWN) {
+        fprintf(stderr, "Unloading previous model from slot %d...\n", slot);
+        /* TODO: Need slot-aware unload functions */
+        /* For now, just clear the slot */
+        ctx->formats[slot] = CIRA_FORMAT_UNKNOWN;
+        ctx->model_handles[slot] = NULL;
     }
+
+    /* Unlock slot mutex - we'll re-lock it after loading */
+    pthread_mutex_unlock(&ctx->model_slot_mutexes[slot]);
 
     /* Detect model format */
     cira_format_t format = detect_format(config_path);
     if (format == CIRA_FORMAT_UNKNOWN) {
+        pthread_mutex_unlock(&ctx->model_mutex);
+        ctx->model_swapping = 0;
         cira_set_error(ctx, "Unknown model format: %s", config_path);
         return CIRA_ERROR_MODEL;
     }
 
-    strncpy(ctx->model_path, config_path, sizeof(ctx->model_path) - 1);
-    ctx->model_name[0] = '\0';  /* Reset model name before loading manifest */
-
-    /* Initialize YOLO version to auto-detect */
-    ctx->yolo_version = YOLO_VERSION_AUTO;
+    /* Store path in slot */
+    strncpy(ctx->model_paths[slot], config_path, sizeof(ctx->model_paths[slot]) - 1);
+    ctx->model_paths[slot][sizeof(ctx->model_paths[slot]) - 1] = '\0';
+    ctx->model_names[slot][0] = '\0';  /* Reset model name before loading manifest */
 
     /* Try to load manifest and labels */
     if (is_directory(config_path)) {
         /* Load manifest first (sets yolo_version, input size, thresholds) */
+        /* Note: load_model_manifest currently uses ctx->model_path and ctx->model_name */
+        /* For now, temporarily sync to legacy fields for manifest loading */
+        strncpy(ctx->model_path, config_path, sizeof(ctx->model_path) - 1);
         load_model_manifest(ctx, config_path);
+
+        /* Copy model name back to slot */
+        strncpy(ctx->model_names[slot], ctx->model_name, sizeof(ctx->model_names[slot]) - 1);
+
         char label_path[1024];
         snprintf(label_path, sizeof(label_path), "%s/obj.names", config_path);
         if (!file_exists(label_path)) {
@@ -815,16 +932,27 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
     }
 
     /* Dispatch to format-specific loader */
+    /* Note: Current loaders use ctx->model_handle and ctx->format */
+    /* We need to temporarily set these for the loader, then restore */
+    cira_format_t saved_format = ctx->format;
+    void* saved_handle = ctx->model_handle;
+    char saved_path[1024];
+    strncpy(saved_path, ctx->model_path, sizeof(saved_path) - 1);
+
+    ctx->format = CIRA_FORMAT_UNKNOWN;
+    ctx->model_handle = NULL;
+    strncpy(ctx->model_path, config_path, sizeof(ctx->model_path) - 1);
+
     int result;
     switch (format) {
-#ifdef CIRA_DARKNET_ENABLED
-        case CIRA_FORMAT_DARKNET:
-            result = darknet_load(ctx, config_path);
-            break;
-#endif
 #ifdef CIRA_ONNX_ENABLED
         case CIRA_FORMAT_ONNX:
             result = onnx_load(ctx, config_path);
+            break;
+#endif
+#ifdef CIRA_DARKNET_ENABLED
+        case CIRA_FORMAT_DARKNET:
+            result = darknet_load(ctx, config_path);
             break;
 #endif
 #ifdef CIRA_TRT_ENABLED
@@ -838,20 +966,80 @@ int cira_load(cira_ctx* ctx, const char* config_path) {
             break;
 #endif
         default:
+            pthread_mutex_unlock(&ctx->model_mutex);
+            ctx->model_swapping = 0;
             cira_set_error(ctx, "Model format not supported in this build");
             return CIRA_ERROR_MODEL;
     }
 
+    /* Lock slot mutex to update slot */
+    pthread_mutex_lock(&ctx->model_slot_mutexes[slot]);
+
     if (result == CIRA_OK) {
-        ctx->format = format;
+        /* Save loaded model to slot */
+        fprintf(stderr, "[DEBUG] Before slot write: ctx->format=%d, ctx->model_handle=%p\n", ctx->format, ctx->model_handle);
+
+        ctx->formats[slot] = ctx->format;
+        ctx->model_handles[slot] = ctx->model_handle;
+        strncpy(ctx->model_paths[slot], ctx->model_path, sizeof(ctx->model_paths[slot]) - 1);
+        strncpy(ctx->model_names[slot], ctx->model_name, sizeof(ctx->model_names[slot]) - 1);
+
+        fprintf(stderr, "[DEBUG] After slot write: slot=%d, formats[%d]=%d, handles[%d]=%p\n",
+                slot, slot, ctx->formats[slot], slot, ctx->model_handles[slot]);
+        fprintf(stderr, "Model loaded successfully into slot %d\n", slot);
+
+        /* For IMAGE slot, keep legacy fields in sync (backward compatibility) */
+        /* For SIGNAL slot, restore legacy fields to previous values */
+        if (slot != MODEL_SLOT_IMAGE) {
+            ctx->format = saved_format;
+            ctx->model_handle = saved_handle;
+            strncpy(ctx->model_path, saved_path, sizeof(ctx->model_path) - 1);
+        }
+        /* Note: If slot == IMAGE, legacy fields already point to the loaded model */
+
+        /* Update status */
         ctx->status = CIRA_STATUS_READY;
+    } else {
+        /* Restore legacy fields on failure */
+        ctx->format = saved_format;
+        ctx->model_handle = saved_handle;
+        strncpy(ctx->model_path, saved_path, sizeof(ctx->model_path) - 1);
     }
+
+    pthread_mutex_unlock(&ctx->model_slot_mutexes[slot]);
 
     /* Unlock and clear swapping flag (inference can resume) */
     pthread_mutex_unlock(&ctx->model_mutex);
     ctx->model_swapping = 0;
 
     fprintf(stderr, "Model swap complete, inference can resume\n");
+    return result;
+}
+
+int cira_load(cira_ctx* ctx, const char* config_path) {
+    if (!ctx || !config_path) return CIRA_ERROR_INPUT;
+
+    /* Auto-detect slot based on input_type from manifest */
+    char input_type[32];
+    detect_input_type_from_manifest(config_path, input_type, sizeof(input_type));
+
+    model_slot_t slot;
+    if (strcmp(input_type, "signal") == 0) {
+        slot = MODEL_SLOT_SIGNAL;
+        fprintf(stderr, "Auto-detected signal model, loading into signal slot\n");
+    } else {
+        slot = MODEL_SLOT_IMAGE;
+        fprintf(stderr, "Auto-detected image model, loading into image slot\n");
+    }
+
+    /* Load into the appropriate slot */
+    int result = cira_load_slot(ctx, config_path, slot);
+
+    /* For backward compatibility, also update legacy fields if loading image model */
+    if (result == CIRA_OK && slot == MODEL_SLOT_IMAGE) {
+        cira_sync_legacy_fields(ctx);
+    }
+
     return result;
 }
 
@@ -1062,13 +1250,16 @@ int cira_signal_ready(cira_ctx* ctx) {
 int cira_predict_signal(cira_ctx* ctx) {
     if (!ctx || !ctx->signal_buffer) return CIRA_ERROR_INPUT;
     if (ctx->status != CIRA_STATUS_READY) return CIRA_ERROR;
-    if (ctx->format == CIRA_FORMAT_UNKNOWN || !ctx->model_handle) {
-        cira_set_error(ctx, "No model loaded");
+
+    /* Check SIGNAL slot for signal prediction */
+    if (SLOT_FORMAT(ctx, MODEL_SLOT_SIGNAL) == CIRA_FORMAT_UNKNOWN ||
+        SLOT_HANDLE(ctx, MODEL_SLOT_SIGNAL) == NULL) {
+        cira_set_error(ctx, "No signal model loaded in SIGNAL slot");
         return CIRA_ERROR_MODEL;
     }
 
     /* Only ONNX models support signal prediction currently */
-    if (ctx->format != CIRA_FORMAT_ONNX) {
+    if (SLOT_FORMAT(ctx, MODEL_SLOT_SIGNAL) != CIRA_FORMAT_ONNX) {
         cira_set_error(ctx, "Signal prediction only supported for ONNX models");
         return CIRA_ERROR_MODEL;
     }

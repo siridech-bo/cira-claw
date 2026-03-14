@@ -571,6 +571,52 @@ static int handle_stats(struct MHD_Connection* conn, cira_ctx* ctx) {
 }
 
 /**
+ * Handle /api/signals endpoint - signal channel statistics.
+ * Returns array of channel stats: [{"name":"ch0", "rms":..., "peak":..., "mean":...}, ...]
+ */
+static int handle_signals(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char response[MAX_RESPONSE_SIZE];
+
+    /* Check if signal buffer exists */
+    if (!ctx->signal_buffer) {
+        snprintf(response, sizeof(response), "[]");
+    } else {
+        signal_buffer_t* buf = (signal_buffer_t*)ctx->signal_buffer;
+        char* p = response;
+        char* end = response + sizeof(response) - 256;
+
+        p += snprintf(p, end - p, "[");
+
+        for (int i = 0; i < buf->num_channels && p < end - 128; i++) {
+            float rms, peak, mean;
+            int result = cira_signal_stats(ctx, i, &rms, &peak, &mean);
+
+            if (result == CIRA_OK) {
+                if (i > 0) {
+                    p += snprintf(p, end - p, ",");
+                }
+                p += snprintf(p, end - p,
+                    "{\"name\":\"%s\",\"rms\":%.6f,\"peak\":%.6f,\"mean\":%.6f}",
+                    buf->channels[i].name, rms, peak, mean);
+            }
+        }
+
+        p += snprintf(p, end - p, "]");
+    }
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
  * Handle /snapshot endpoint.
  */
 static int handle_snapshot(struct MHD_Connection* conn, cira_ctx* ctx) {
@@ -891,13 +937,15 @@ static int handle_models_list(struct MHD_Connection* conn, cira_ctx* ctx) {
 
 /**
  * Handle POST /api/model - Load a new model.
+ * JSON format: {"path":"...", "slot":"image|signal"} (slot is optional)
  */
 static int handle_model_load(struct MHD_Connection* conn, cira_ctx* ctx,
                              const char* upload_data, size_t upload_size) {
     char response[2048];
 
-    /* Parse model path from POST data (simple JSON: {"path":"..."}) */
+    /* Parse model path and optional slot from POST data */
     char model_path[512] = "";
+    char slot_str[32] = "";
 
     if (upload_data && upload_size > 0) {
         /* Find "path" in JSON */
@@ -912,6 +960,22 @@ static int handle_model_load(struct MHD_Connection* conn, cira_ctx* ctx,
                     if (len >= sizeof(model_path)) len = sizeof(model_path) - 1;
                     memcpy(model_path, path_key, len);
                     model_path[len] = '\0';
+                }
+            }
+        }
+
+        /* Find optional "slot" in JSON */
+        const char* slot_key = strstr(upload_data, "\"slot\"");
+        if (slot_key) {
+            slot_key = strchr(slot_key + 6, '"');
+            if (slot_key) {
+                slot_key++;
+                const char* slot_end = strchr(slot_key, '"');
+                if (slot_end) {
+                    size_t len = slot_end - slot_key;
+                    if (len >= sizeof(slot_str)) len = sizeof(slot_str) - 1;
+                    memcpy(slot_str, slot_key, len);
+                    slot_str[len] = '\0';
                 }
             }
         }
@@ -930,17 +994,44 @@ static int handle_model_load(struct MHD_Connection* conn, cira_ctx* ctx,
         return ret;
     }
 
-    fprintf(stderr, "Loading model: %s\n", model_path);
-
-    /* Load the new model */
-    int result = cira_load(ctx, model_path);
+    /* Determine which slot to use */
+    int result;
+    const char* slot_name = "auto";
+    if (slot_str[0] != '\0') {
+        /* Explicit slot specified */
+        model_slot_t slot;
+        if (strcmp(slot_str, "image") == 0) {
+            slot = MODEL_SLOT_IMAGE;
+            slot_name = "image";
+        } else if (strcmp(slot_str, "signal") == 0) {
+            slot = MODEL_SLOT_SIGNAL;
+            slot_name = "signal";
+        } else {
+            snprintf(response, sizeof(response),
+                    "{\"success\":false,\"error\":\"Invalid slot: %s (use 'image' or 'signal')\"}",
+                    slot_str);
+            struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+                strlen(response), response, MHD_RESPMEM_MUST_COPY);
+            MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+            MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+            int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+            MHD_destroy_response(mhd_response);
+            return ret;
+        }
+        fprintf(stderr, "Loading model into %s slot: %s\n", slot_name, model_path);
+        result = cira_load_slot(ctx, model_path, slot);
+    } else {
+        /* Auto-detect slot from manifest */
+        fprintf(stderr, "Loading model (auto-detect slot): %s\n", model_path);
+        result = cira_load(ctx, model_path);
+    }
 
     if (result == CIRA_OK) {
         const char* fmt = ctx->format == CIRA_FORMAT_ONNX ? "onnx" :
                           ctx->format == CIRA_FORMAT_NCNN ? "ncnn" : "unknown";
         snprintf(response, sizeof(response),
-                "{\"success\":true,\"model\":\"%.500s\",\"format\":\"%s\"}",
-                model_path, fmt);
+                "{\"success\":true,\"model\":\"%.500s\",\"slot\":\"%s\",\"format\":\"%s\"}",
+                model_path, slot_name, fmt);
     } else {
         const char* err = cira_error(ctx);
         snprintf(response, sizeof(response),
@@ -955,6 +1046,60 @@ static int handle_model_load(struct MHD_Connection* conn, cira_ctx* ctx,
     MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
 
     int ret = MHD_queue_response(conn, result == CIRA_OK ? MHD_HTTP_OK : MHD_HTTP_BAD_REQUEST, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
+ * Handle GET /api/slots - Show status of all model slots.
+ */
+static int handle_slots(struct MHD_Connection* conn, cira_ctx* ctx) {
+    char response[4096];
+    char* p = response;
+    char* end = response + sizeof(response);
+
+    p += snprintf(p, end - p, "{\"slots\":[");
+
+    for (int slot = 0; slot < MODEL_SLOT_COUNT; slot++) {
+        const char* slot_name = (slot == MODEL_SLOT_IMAGE) ? "image" : "signal";
+        const char* format_str = "unknown";
+
+        fprintf(stderr, "[DEBUG] Reading slot %d: formats[%d]=%d, handles[%d]=%p\n",
+                slot, slot, SLOT_FORMAT(ctx, slot), slot, SLOT_HANDLE(ctx, slot));
+
+        switch (SLOT_FORMAT(ctx, slot)) {
+            case CIRA_FORMAT_ONNX: format_str = "onnx"; break;
+            case CIRA_FORMAT_DARKNET: format_str = "darknet"; break;
+            case CIRA_FORMAT_NCNN: format_str = "ncnn"; break;
+            case CIRA_FORMAT_TENSORRT: format_str = "tensorrt"; break;
+            default: format_str = "none"; break;
+        }
+
+        int loaded = (SLOT_FORMAT(ctx, slot) != CIRA_FORMAT_UNKNOWN && SLOT_HANDLE(ctx, slot) != NULL) ? 1 : 0;
+
+        p += snprintf(p, end - p,
+                     "{\"slot\":\"%s\",\"loaded\":%s,\"format\":\"%s\",\"path\":\"%.500s\",\"name\":\"%.200s\"}",
+                     slot_name,
+                     loaded ? "true" : "false",
+                     format_str,
+                     SLOT_PATH(ctx, slot),
+                     SLOT_NAME(ctx, slot));
+
+        if (slot < MODEL_SLOT_COUNT - 1) {
+            p += snprintf(p, end - p, ",");
+        }
+    }
+
+    p += snprintf(p, end - p, "]}");
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
     MHD_destroy_response(mhd_response);
 
     return ret;
@@ -1588,6 +1733,136 @@ static int handle_camera_stop(struct MHD_Connection* conn, cira_ctx* ctx) {
 }
 
 /**
+ * Handle POST /api/signal/feed - feed signal samples to a channel.
+ * Request: {"channel": 0, "samples": [0.1, 0.2, ...]}
+ * Response: {"fed": N, "buffer_ready": bool, "prediction_ran": bool, "result": {...}}
+ */
+static int handle_signal_feed(struct MHD_Connection* conn, cira_ctx* ctx,
+                               const char* upload_data, size_t upload_size) {
+    char response[MAX_RESPONSE_SIZE];
+
+    /* Check if signal buffer exists */
+    if (!ctx->signal_buffer) {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"No signal model loaded\"}");
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    /* Parse channel and samples from JSON */
+    int channel = 0;
+    float samples[4096];
+    int sample_count = 0;
+
+    if (upload_data && upload_size > 0) {
+        /* Find "channel" in JSON */
+        const char* ch_key = strstr(upload_data, "\"channel\"");
+        if (ch_key) {
+            ch_key = strchr(ch_key + 9, ':');
+            if (ch_key) {
+                channel = atoi(ch_key + 1);
+            }
+        }
+
+        /* Find "samples" array in JSON */
+        const char* samples_key = strstr(upload_data, "\"samples\"");
+        if (samples_key) {
+            const char* arr_start = strchr(samples_key + 9, '[');
+            if (arr_start) {
+                arr_start++;
+                const char* p = arr_start;
+                while (*p && *p != ']' && sample_count < 4096) {
+                    while (*p == ' ' || *p == ',' || *p == '\n') p++;
+                    if (*p == ']') break;
+                    samples[sample_count++] = (float)atof(p);
+                    while (*p && *p != ',' && *p != ']') p++;
+                }
+            }
+        }
+    }
+
+    if (sample_count == 0) {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"No samples provided\"}");
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    /* Feed samples */
+    int result = cira_feed_signal_batch(ctx, channel, samples, sample_count);
+    if (result != CIRA_OK) {
+        snprintf(response, sizeof(response),
+                "{\"success\":false,\"error\":\"Failed to feed samples\"}");
+        struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+            strlen(response), response, MHD_RESPMEM_MUST_COPY);
+        MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+        MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+        int ret = MHD_queue_response(conn, MHD_HTTP_BAD_REQUEST, mhd_response);
+        MHD_destroy_response(mhd_response);
+        return ret;
+    }
+
+    /* Check if buffer is ready and run prediction if so */
+    int ready = cira_signal_ready(ctx);
+    int prediction_ran = 0;
+    const char* pred_error = NULL;
+
+    fprintf(stderr, "After feeding %d samples to ch%d: ready=%d\n", sample_count, channel, ready);
+
+    if (ready == 1) {
+        fprintf(stderr, "  Buffer ready, attempting prediction...\n");
+        result = cira_predict_signal(ctx);
+        fprintf(stderr, "  Prediction result: %d\n", result);
+        if (result == CIRA_OK) {
+            prediction_ran = 1;
+        } else {
+            /* Get error message if prediction failed */
+            pred_error = cira_error(ctx);
+            fprintf(stderr, "  Prediction failed: %s\n", pred_error ? pred_error : "(no error message)");
+        }
+    }
+
+    /* Build response */
+    const char* result_json = prediction_ran ? cira_result_json(ctx) : "null";
+    if (pred_error) {
+        snprintf(response, sizeof(response),
+                "{\"success\":true,\"fed\":%d,\"buffer_ready\":%s,\"prediction_ran\":%s,\"result\":%s,\"pred_error\":\"%s\"}",
+                sample_count,
+                ready == 1 ? "true" : "false",
+                prediction_ran ? "true" : "false",
+                result_json,
+                pred_error);
+    } else {
+        snprintf(response, sizeof(response),
+                "{\"success\":true,\"fed\":%d,\"buffer_ready\":%s,\"prediction_ran\":%s,\"result\":%s}",
+                sample_count,
+                ready == 1 ? "true" : "false",
+                prediction_ran ? "true" : "false",
+                result_json);
+    }
+
+    struct MHD_Response* mhd_response = MHD_create_response_from_buffer(
+        strlen(response), response, MHD_RESPMEM_MUST_COPY);
+    MHD_add_response_header(mhd_response, "Content-Type", CT_JSON);
+    MHD_add_response_header(mhd_response, "Access-Control-Allow-Origin", "*");
+
+    int ret = MHD_queue_response(conn, MHD_HTTP_OK, mhd_response);
+    MHD_destroy_response(mhd_response);
+
+    return ret;
+}
+
+/**
  * Handle POST /api/inference/image - run inference on a single image.
  * Accepts either:
  * - {"path": "/path/to/image.jpg"} for device-local image
@@ -1826,6 +2101,8 @@ static enum MHD_Result request_handler(
             ret = handle_camera_start(conn, ctx, pctx->data, pctx->size);
         } else if (strcmp(url, "/api/camera/stop") == 0) {
             ret = handle_camera_stop(conn, ctx);
+        } else if (strcmp(url, "/api/signal/feed") == 0) {
+            ret = handle_signal_feed(conn, ctx, pctx->data, pctx->size);
         } else if (strcmp(url, "/api/inference/image") == 0) {
             ret = handle_inference_image(conn, ctx, pctx->data, pctx->size);
         } else {
@@ -1857,6 +2134,12 @@ static enum MHD_Result request_handler(
     }
     if (strcmp(url, "/api/stats") == 0) {
         return handle_stats(conn, ctx);
+    }
+    if (strcmp(url, "/api/signals") == 0) {
+        return handle_signals(conn, ctx);
+    }
+    if (strcmp(url, "/api/slots") == 0) {
+        return handle_slots(conn, ctx);
     }
     if (strcmp(url, "/api/models") == 0) {
         return handle_models_list(conn, ctx);

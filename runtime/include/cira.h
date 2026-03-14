@@ -32,6 +32,13 @@ typedef struct cira_ctx cira_ctx;
 #define CIRA_STATUS_LOADING  1
 #define CIRA_STATUS_ERROR    2
 
+/* === Model slot identifiers (dual-model support) === */
+typedef enum {
+    MODEL_SLOT_IMAGE = 0,   /* Used by camera thread for image inference */
+    MODEL_SLOT_SIGNAL = 1,  /* Used by signal API for signal inference */
+    MODEL_SLOT_COUNT = 2
+} model_slot_t;
+
 /* === Lifecycle functions === */
 
 /**
@@ -57,6 +64,17 @@ cira_ctx* cira_create(void);
  * @return CIRA_OK on success, error code on failure
  */
 int cira_load(cira_ctx* ctx, const char* config_path);
+
+/**
+ * Load a model into a specific slot.
+ * Allows explicit control over which slot (image or signal) to load into.
+ *
+ * @param ctx Context handle
+ * @param config_path Path to model config or model directory
+ * @param slot Model slot (MODEL_SLOT_IMAGE or MODEL_SLOT_SIGNAL)
+ * @return CIRA_OK on success, error code on failure
+ */
+int cira_load_slot(cira_ctx* ctx, const char* config_path, model_slot_t slot);
 
 /**
  * Destroy context and free resources.

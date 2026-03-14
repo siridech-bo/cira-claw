@@ -122,23 +122,28 @@ static void* camera_thread_func_impl(void* arg) {
             cira_write_frame_file(ctx, 1);  /* 1 = annotated */
         }
 
-        /* Run inference if model is loaded and not being swapped */
-        if (ctx->format != CIRA_FORMAT_UNKNOWN && ctx->model_handle != NULL && !ctx->model_swapping) {
-            /* Lock model mutex to prevent model unload during inference */
-            if (pthread_mutex_trylock(&ctx->model_mutex) == 0) {
+        /* Run inference if IMAGE slot model is loaded and not being swapped */
+        if (SLOT_FORMAT(ctx, MODEL_SLOT_IMAGE) != CIRA_FORMAT_UNKNOWN &&
+            SLOT_HANDLE(ctx, MODEL_SLOT_IMAGE) != NULL &&
+            !ctx->model_swapping) {
+
+            /* Lock IMAGE slot mutex to prevent model unload during inference */
+            if (pthread_mutex_trylock(&SLOT_MUTEX(ctx, MODEL_SLOT_IMAGE)) == 0) {
                 /* Double-check after acquiring lock */
-                if (ctx->model_handle != NULL && !ctx->model_swapping) {
-                    /* Call predict with RGB data */
+                if (SLOT_HANDLE(ctx, MODEL_SLOT_IMAGE) != NULL && !ctx->model_swapping) {
+                    /* Call predict with RGB data (always using IMAGE slot) */
                     int result = CIRA_ERROR;
 
-                    switch (ctx->format) {
+                    switch (SLOT_FORMAT(ctx, MODEL_SLOT_IMAGE)) {
 #ifdef CIRA_DARKNET_ENABLED
                         case CIRA_FORMAT_DARKNET:
+                            /* Note: darknet_predict would need slot parameter */
                             result = darknet_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
                             break;
 #endif
 #ifdef CIRA_NCNN_ENABLED
                         case CIRA_FORMAT_NCNN:
+                            /* Note: ncnn_predict would need slot parameter */
                             result = ncnn_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
                             break;
 #endif
@@ -149,6 +154,7 @@ static void* camera_thread_func_impl(void* arg) {
 #endif
 #ifdef CIRA_TRT_ENABLED
                         case CIRA_FORMAT_TENSORRT:
+                            /* Note: trt_predict would need slot parameter */
                             result = trt_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
                             break;
 #endif
@@ -167,7 +173,7 @@ static void* camera_thread_func_impl(void* arg) {
                         }
                     }
                 }
-                pthread_mutex_unlock(&ctx->model_mutex);
+                pthread_mutex_unlock(&SLOT_MUTEX(ctx, MODEL_SLOT_IMAGE));
             }
             /* If trylock fails, model is being swapped - skip this frame */
         }

@@ -260,6 +260,7 @@ extern "C" int ncnn_load(cira_ctx* ctx, const char* model_path) {
 
     /* Store model handle in context */
     ctx->model_handle = model;
+    ctx->format = CIRA_FORMAT_NCNN;
 
     fprintf(stderr, "NCNN model loaded successfully\n");
     return CIRA_OK;
