@@ -99,6 +99,38 @@ export async function registerApiRoutes(
     const nodes = nodeManager.getAllNodes();
     const statuses = nodeManager.getAllStatuses();
 
+    // Fetch signal slot status for online nodes (in parallel, with timeout)
+    const signalSlotPromises = nodes.map(async (node) => {
+      const status = statuses.find(s => s.id === node.id);
+      if (status?.status !== 'online') return { id: node.id, signalSlot: null };
+
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+
+        const response = await fetch(
+          `http://${node.host}:${node.runtime.port}/api/slots`,
+          { signal: controller.signal }
+        );
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const data = await response.json();
+          const signalSlot = data.slots?.find((s: { slot: string }) => s.slot === 'SIGNAL');
+          return {
+            id: node.id,
+            signalSlot: signalSlot ? { loaded: signalSlot.loaded, name: signalSlot.name } : null
+          };
+        }
+      } catch {
+        // Silent fail - signal slot info is optional
+      }
+      return { id: node.id, signalSlot: null };
+    });
+
+    const signalSlotResults = await Promise.all(signalSlotPromises);
+    const signalSlotMap = new Map(signalSlotResults.map(r => [r.id, r.signalSlot]));
+
     const nodesWithStatus = nodes.map(node => {
       const status = statuses.find(s => s.id === node.id);
       return {
@@ -107,6 +139,7 @@ export async function registerApiRoutes(
         lastSeen: status?.lastSeen || null,
         metrics: status?.metrics || null,
         inference: status?.inference || null,
+        signalSlot: signalSlotMap.get(node.id) || null,
       };
     });
 
@@ -533,6 +566,170 @@ export async function registerApiRoutes(
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         logger.error(`Failed to switch model on node ${id}: ${errorMessage}`);
+        return reply.status(502).send({
+          error: 'Failed to connect to node',
+          message: errorMessage,
+        });
+      }
+    }
+  );
+
+  // Get model slots status for a node
+  fastify.get<{ Params: NodeParams }>(
+    '/api/nodes/:id/slots',
+    async (request: FastifyRequest<{ Params: NodeParams }>, reply: FastifyReply) => {
+      const { id } = request.params;
+      const node = nodeManager.getNode(id);
+
+      if (!node) {
+        return reply.status(404).send({
+          error: 'Node not found',
+          message: `Node with id '${id}' does not exist`,
+        });
+      }
+
+      try {
+        const url = `http://${node.host}:${node.runtime.port}/api/slots`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          return reply.status(502).send({
+            error: 'Failed to get slots from node',
+            message: `Node returned HTTP ${response.status}`,
+          });
+        }
+
+        return await response.json();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return reply.status(502).send({
+          error: 'Failed to connect to node',
+          message: errorMessage,
+        });
+      }
+    }
+  );
+
+  // Get signal channels status for a node
+  fastify.get<{ Params: NodeParams }>(
+    '/api/nodes/:id/signal/channels',
+    async (request: FastifyRequest<{ Params: NodeParams }>, reply: FastifyReply) => {
+      const { id } = request.params;
+      const node = nodeManager.getNode(id);
+
+      if (!node) {
+        return reply.status(404).send({
+          error: 'Node not found',
+          message: `Node with id '${id}' does not exist`,
+        });
+      }
+
+      try {
+        const url = `http://${node.host}:${node.runtime.port}/api/signal/channels`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          // Return empty signal data if not available
+          if (response.status === 404) {
+            return { loaded: false, num_channels: 0, window_size: 0, sample_rate_hz: 0, channels: [] };
+          }
+          return reply.status(502).send({
+            error: 'Failed to get signal channels from node',
+            message: `Node returned HTTP ${response.status}`,
+          });
+        }
+
+        return await response.json();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return reply.status(502).send({
+          error: 'Failed to connect to node',
+          message: errorMessage,
+        });
+      }
+    }
+  );
+
+  // Get signal inference result for a node
+  fastify.get<{ Params: NodeParams }>(
+    '/api/nodes/:id/signal/result',
+    async (request: FastifyRequest<{ Params: NodeParams }>, reply: FastifyReply) => {
+      const { id } = request.params;
+      const node = nodeManager.getNode(id);
+
+      if (!node) {
+        return reply.status(404).send({
+          error: 'Node not found',
+          message: `Node with id '${id}' does not exist`,
+        });
+      }
+
+      try {
+        const url = `http://${node.host}:${node.runtime.port}/api/signal/result`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          return reply.status(502).send({
+            error: 'Failed to get signal result from node',
+            message: `Node returned HTTP ${response.status}`,
+          });
+        }
+
+        return await response.json();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return reply.status(502).send({
+          error: 'Failed to connect to node',
+          message: errorMessage,
+        });
+      }
+    }
+  );
+
+  // Get signal stats for a node
+  fastify.get<{ Params: NodeParams }>(
+    '/api/nodes/:id/signals',
+    async (request: FastifyRequest<{ Params: NodeParams }>, reply: FastifyReply) => {
+      const { id } = request.params;
+      const node = nodeManager.getNode(id);
+
+      if (!node) {
+        return reply.status(404).send({
+          error: 'Node not found',
+          message: `Node with id '${id}' does not exist`,
+        });
+      }
+
+      try {
+        const url = `http://${node.host}:${node.runtime.port}/api/signals`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          return reply.status(502).send({
+            error: 'Failed to get signals from node',
+            message: `Node returned HTTP ${response.status}`,
+          });
+        }
+
+        return await response.json();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return reply.status(502).send({
           error: 'Failed to connect to node',
           message: errorMessage,

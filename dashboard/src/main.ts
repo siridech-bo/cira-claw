@@ -7,6 +7,7 @@ import CameraGrid from './pages/CameraGrid.vue';
 import Chat from './pages/Chat.vue';
 import Rules from './pages/Rules.vue';
 import RuleGraph from './pages/RuleGraph.vue';
+import SignalMonitor from './pages/SignalMonitor.vue';
 import ModelConversion from './pages/ModelConversion.vue';
 import CameraManager from './pages/CameraManager.vue';
 import ImageTester from './pages/ImageTester.vue';
@@ -15,6 +16,7 @@ const routes = [
   { path: '/', component: Overview },
   { path: '/device/:id', component: DeviceDetail },
   { path: '/cameras', component: CameraGrid },
+  { path: '/signals', component: SignalMonitor },
   { path: '/chat', component: Chat },
   { path: '/rules', component: Rules },
   { path: '/rule-graph', component: RuleGraph },

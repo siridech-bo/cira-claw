@@ -16,6 +16,11 @@ interface NodeInference {
   lastDefect: string | null;
 }
 
+interface SignalSlotInfo {
+  loaded: boolean;
+  name: string | null;
+}
+
 interface Node {
   id: string;
   name: string;
@@ -25,6 +30,7 @@ interface Node {
   lastSeen: string | null;
   metrics: NodeMetrics | null;
   inference: NodeInference | null;
+  signalSlot?: SignalSlotInfo | null;
   location?: string;
 }
 
@@ -120,9 +126,18 @@ function formatUptime(seconds: number | null | undefined): string {
 
     <div class="card-footer">
       <span class="host">{{ node.host }}</span>
-      <span class="uptime" v-if="node.metrics?.uptime">
-        Uptime: {{ formatUptime(node.metrics.uptime) }}
-      </span>
+      <div class="footer-right">
+        <span
+          v-if="node.signalSlot"
+          class="signal-badge"
+          :class="node.signalSlot.loaded ? 'loaded' : 'empty'"
+        >
+          Signal: {{ node.signalSlot.loaded ? 'OK' : '--' }}
+        </span>
+        <span class="uptime" v-if="node.metrics?.uptime">
+          {{ formatUptime(node.metrics.uptime) }}
+        </span>
+      </div>
     </div>
   </router-link>
 </template>
@@ -240,5 +255,29 @@ function formatUptime(seconds: number | null | undefined): string {
 
 .host {
   font-family: monospace;
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.signal-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.signal-badge.loaded {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10B981;
+}
+
+.signal-badge.empty {
+  background: rgba(148, 163, 184, 0.15);
+  color: #64748B;
 }
 </style>

@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import CameraStream from '../components/CameraStream.vue';
+import SignalResultBadge from '../components/SignalResultBadge.vue';
 
 interface NodeMetrics {
   fps: number | null;
@@ -64,16 +65,31 @@ const modelError = ref<string | null>(null);
 const modelSuccess = ref<string | null>(null);
 const streamMode = ref<'auto' | 'mjpeg' | 'polling'>('auto');
 
+// Signal model state
+interface SignalSlot {
+  slot: string;
+  loaded: boolean;
+  format: string | null;
+  name: string | null;
+  labels: string[];
+  input_type: string | null;
+}
+
+const signalSlot = ref<SignalSlot | null>(null);
+const signalResult = ref<string | null>(null);
+
 let refreshTimer: number | null = null;
 
 onMounted(async () => {
   await fetchNode();
   await fetchModels();
+  await fetchSignalData();
 
   // Start periodic refresh every 3 seconds
   refreshTimer = window.setInterval(async () => {
     if (!loading.value && !modelSwitching.value) {
       await fetchNodeSilent();
+      await fetchSignalData();
     }
   }, 3000);
 });
@@ -198,6 +214,29 @@ function formatUptime(seconds: number | null | undefined): string {
   const minutes = Math.floor((seconds % 3600) / 60);
   if (days > 0) return `${days} days, ${hours} hours`;
   return `${hours} hours, ${minutes} minutes`;
+}
+
+async function fetchSignalData() {
+  try {
+    // Fetch slot info
+    const slotsRes = await fetch(`/api/nodes/${nodeId.value}/slots`);
+    if (slotsRes.ok) {
+      const data = await slotsRes.json();
+      const slot = data.slots?.find((s: SignalSlot) => s.slot === 'SIGNAL');
+      signalSlot.value = slot || null;
+    }
+
+    // Fetch signal result if signal slot is loaded
+    if (signalSlot.value?.loaded) {
+      const resultRes = await fetch(`/api/nodes/${nodeId.value}/signal/result`);
+      if (resultRes.ok) {
+        const resultData = await resultRes.json();
+        signalResult.value = typeof resultData === 'string' ? resultData : JSON.stringify(resultData);
+      }
+    }
+  } catch (e) {
+    // Silent fail - signal data is optional
+  }
 }
 
 </script>
@@ -361,6 +400,32 @@ function formatUptime(seconds: number | null | undefined): string {
           <p class="model-hint" v-if="node.status !== 'online'">
             Device must be online to switch models
           </p>
+        </div>
+
+        <div class="info-card signal-card" v-if="signalSlot">
+          <h3>Signal Model</h3>
+          <div class="info-row">
+            <span class="label">Status</span>
+            <span class="signal-badge" :class="signalSlot.loaded ? 'loaded' : 'empty'">
+              {{ signalSlot.loaded ? 'LOADED' : 'EMPTY' }}
+            </span>
+          </div>
+          <div class="info-row" v-if="signalSlot.loaded">
+            <span class="label">Model</span>
+            <span>{{ signalSlot.name || 'Unknown' }}</span>
+          </div>
+          <div class="info-row" v-if="signalSlot.loaded && signalSlot.format">
+            <span class="label">Format</span>
+            <span class="mono">{{ signalSlot.format }}</span>
+          </div>
+          <div class="info-row" v-if="signalSlot.loaded && signalSlot.labels?.length">
+            <span class="label">Classes</span>
+            <span>{{ signalSlot.labels.join(', ') }}</span>
+          </div>
+          <div class="signal-result" v-if="signalSlot.loaded && signalResult">
+            <h4>Last Inference</h4>
+            <SignalResultBadge :resultJson="signalResult" :timestamp="null" />
+          </div>
         </div>
 
         <div class="info-card">
@@ -739,6 +804,43 @@ function formatUptime(seconds: number | null | undefined): string {
   font-size: 0.75rem;
   color: #64748b;
   font-style: italic;
+}
+
+/* Signal Card Styles */
+.signal-card {
+  background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+}
+
+.signal-badge {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.signal-badge.loaded {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10B981;
+}
+
+.signal-badge.empty {
+  background: rgba(148, 163, 184, 0.2);
+  color: #94A3B8;
+}
+
+.signal-result {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #334155;
+}
+
+.signal-result h4 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748B;
+  text-transform: uppercase;
+  margin-bottom: 12px;
 }
 
 @media (max-width: 768px) {

@@ -25,6 +25,8 @@ export default defineConfig({
         target: 'ws://localhost:18790',
         ws: true,
       },
+      // Proxy signal APIs to gateway (routes to runtime)
+      '/api/signal': 'http://localhost:18790',
       // Proxy direct runtime APIs to C++ runtime on port 8080
       '/api/cameras': 'http://localhost:8080',
       '/api/files': 'http://localhost:8080',

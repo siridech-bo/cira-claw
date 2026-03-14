@@ -79,6 +79,10 @@ async function checkConnection() {
           <span class="icon">📷</span>
           Cameras
         </RouterLink>
+        <RouterLink to="/signals" class="nav-link">
+          <span class="icon">📈</span>
+          Signals
+        </RouterLink>
         <RouterLink to="/chat" class="nav-link">
           <span class="icon">💬</span>
           Chat
