@@ -301,8 +301,8 @@ const tools: Tool[] = [
         },
         socket_type: {
           type: 'string',
-          enum: ['vision.detection', 'vision.confidence', 'signal.threshold', 'signal.rate', 'system.health', 'any.boolean'],
-          description: 'Signal category this rule evaluates. INFER from which payload fields the code accesses. vision.detection for detections[]/by_label; vision.confidence for detections[].confidence; signal.threshold for stats.fps/uptime; signal.rate for defects_per_hour/hourly; system.health for node.status/frame.number; any.boolean otherwise.',
+          enum: ['vision.detection', 'vision.confidence', 'signal.vibration', 'signal.anomaly', 'signal.threshold', 'signal.rate', 'system.health', 'any.boolean'],
+          description: 'Signal category this rule evaluates. INFER from which payload fields the code accesses. vision.detection for detections[]/by_label; vision.confidence for detections[].confidence; signal.vibration for signals.<channel>.rms/peak/mean; signal.anomaly for signal_prediction.*; signal.threshold for stats.fps/uptime; signal.rate for defects_per_hour/hourly; system.health for node.status/frame.number; any.boolean otherwise.',
         },
         reads: {
           type: 'array',
