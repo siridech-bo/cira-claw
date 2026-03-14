@@ -840,14 +840,23 @@ static int parse_signal_output(cira_ctx* ctx,
         /* Find class with max probability */
         int max_class = 0;
         float max_prob = output_data[0];
-        for (int i = 1; i < output_size && i < ctx->num_labels; i++) {
+        int num_classes = (ctx->signal_num_labels > 0) ? ctx->signal_num_labels : output_size;
+        for (int i = 1; i < output_size && i < num_classes; i++) {
             if (output_data[i] > max_prob) {
                 max_prob = output_data[i];
                 max_class = i;
             }
         }
 
-        const char* label = (max_class < ctx->num_labels) ? ctx->labels[max_class] : "unknown";
+        /* Use signal labels if available, otherwise generate fallback */
+        char fallback_label[32];
+        const char* label;
+        if (ctx->signal_num_labels > 0 && max_class < ctx->signal_num_labels) {
+            label = ctx->signal_labels[max_class];
+        } else {
+            snprintf(fallback_label, sizeof(fallback_label), "class_%d", max_class);
+            label = fallback_label;
+        }
         snprintf(ctx->result_json, CIRA_MAX_JSON_LEN,
                  "{\"class\":\"%s\",\"probability\":%.4f}",
                  label, max_prob);
@@ -858,8 +867,16 @@ static int parse_signal_output(cira_ctx* ctx,
         char* end = ctx->result_json + CIRA_MAX_JSON_LEN;
         p += snprintf(p, end - p, "{\"classes\":[");
 
-        for (int i = 0; i < output_size && i < ctx->num_labels && p < end - 128; i++) {
-            const char* label = ctx->labels[i];
+        int num_classes = (ctx->signal_num_labels > 0) ? ctx->signal_num_labels : output_size;
+        char fallback_label[32];
+        for (int i = 0; i < output_size && i < num_classes && p < end - 128; i++) {
+            const char* label;
+            if (ctx->signal_num_labels > 0 && i < ctx->signal_num_labels) {
+                label = ctx->signal_labels[i];
+            } else {
+                snprintf(fallback_label, sizeof(fallback_label), "class_%d", i);
+                label = fallback_label;
+            }
             if (i > 0) p += snprintf(p, end - p, ",");
             p += snprintf(p, end - p, "{\"label\":\"%s\",\"prob\":%.4f}",
                          label, output_data[i]);

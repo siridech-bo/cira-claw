@@ -507,6 +507,13 @@ static int load_model_manifest(cira_ctx* ctx, const char* model_dir) {
             free(output_obj);
         }
 
+        /* --- Parse signal class labels --- */
+        ctx->signal_num_labels = json_get_string_array(json, "labels",
+                                                        ctx->signal_labels, CIRA_MAX_LABELS);
+        if (ctx->signal_num_labels > 0) {
+            fprintf(stderr, "Signal labels loaded: %d classes\n", ctx->signal_num_labels);
+        }
+
         /* --- Create signal buffer --- */
         const char* channel_names[16];
         for (int i = 0; i < num_channels; i++) {
@@ -736,6 +743,10 @@ cira_ctx* cira_create(void) {
     strcpy(ctx->result_json, "{\"detections\":[],\"count\":0}");
     strcpy(ctx->signal_result_json, "{\"status\":\"no_prediction_yet\"}");
     ctx->signal_result_valid = 0;
+
+    /* Initialize signal labels (separate from image labels) */
+    ctx->signal_num_labels = 0;
+    ctx->signal_labels[0][0] = '\0';
 
     /* Initialize cumulative statistics */
     ctx->total_detections = 0;
@@ -1286,6 +1297,13 @@ int cira_predict_signal(cira_ctx* ctx) {
     if (!ctx || !ctx->signal_buffer) return CIRA_ERROR_INPUT;
     if (ctx->status != CIRA_STATUS_READY) return CIRA_ERROR;
 
+    /* Clear any stale error from other threads (e.g., camera thread) */
+    ctx->error_msg[0] = '\0';
+
+    /* Debug: Log slot status */
+    fprintf(stderr, "[SIGNAL] Checking slot: format=%d, handle=%p\n",
+            SLOT_FORMAT(ctx, MODEL_SLOT_SIGNAL), SLOT_HANDLE(ctx, MODEL_SLOT_SIGNAL));
+
     /* Check SIGNAL slot for signal prediction */
     if (SLOT_FORMAT(ctx, MODEL_SLOT_SIGNAL) == CIRA_FORMAT_UNKNOWN ||
         SLOT_HANDLE(ctx, MODEL_SLOT_SIGNAL) == NULL) {
@@ -1295,7 +1313,8 @@ int cira_predict_signal(cira_ctx* ctx) {
 
     /* Only ONNX models support signal prediction currently */
     if (SLOT_FORMAT(ctx, MODEL_SLOT_SIGNAL) != CIRA_FORMAT_ONNX) {
-        cira_set_error(ctx, "Signal prediction only supported for ONNX models");
+        cira_set_error(ctx, "Signal prediction only supported for ONNX models (got format=%d)",
+                       SLOT_FORMAT(ctx, MODEL_SLOT_SIGNAL));
         return CIRA_ERROR_MODEL;
     }
 
@@ -1352,7 +1371,10 @@ int cira_predict_signal(cira_ctx* ctx) {
     }
 
     /* Run inference */
+    fprintf(stderr, "[SIGNAL] Calling onnx_predict_tensor with feature_size=%d\n", feature_size);
     int result = onnx_predict_tensor(ctx, features, feature_size);
+    fprintf(stderr, "[SIGNAL] onnx_predict_tensor returned: %d, error_msg='%s'\n",
+            result, ctx->error_msg[0] ? ctx->error_msg : "(none)");
 
     free(features);
 

@@ -75,8 +75,8 @@
   },
   "num_classes": 3,
   "labels": [
-    "class_0",
-    "class_1",
-    "class_2"
+    "Normal",
+    "Fault_A",
+    "Fault_B"
   ]
 }

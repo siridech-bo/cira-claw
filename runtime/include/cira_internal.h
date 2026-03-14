@@ -72,9 +72,13 @@ struct cira_ctx {
     char model_name[256];           /* Alias for model_names[MODEL_SLOT_IMAGE] */
     void* model_handle;             /* Alias for model_handles[MODEL_SLOT_IMAGE] */
 
-    /* Labels */
+    /* Labels (image slot) */
     char labels[CIRA_MAX_LABELS][CIRA_MAX_LABEL_LEN];
     int num_labels;
+
+    /* Labels (signal slot - independent from image labels) */
+    char signal_labels[CIRA_MAX_LABELS][128];  /* 128 to match json_get_string_array */
+    int signal_num_labels;
 
     /* Model input size */
     int input_w;
