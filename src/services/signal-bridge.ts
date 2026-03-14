@@ -78,6 +78,7 @@ interface ModbusConnection {
   reconnectTimeout: NodeJS.Timeout | null;
   transactionId: number;
   buffers: Map<string, number[]>; // channel name -> samples
+  pendingRequests: Map<number, string>; // transactionId -> channel name
 }
 
 interface MqttSubscription {
@@ -324,6 +325,7 @@ export class SignalBridgeService {
       reconnectTimeout: null,
       transactionId: 0,
       buffers: new Map(),
+      pendingRequests: new Map(),
     };
 
     // Initialize buffers for each channel
@@ -364,6 +366,9 @@ export class SignalBridgeService {
           conn.pollInterval = null;
         }
 
+        // Clear pending requests to prevent stale entries from matching new connection's responses
+        conn.pendingRequests.clear();
+
         // Auto-reconnect after 2 seconds
         conn.reconnectTimeout = setTimeout(() => {
           logger.info(`MODBUS reconnecting: ${source.id}`);
@@ -379,6 +384,9 @@ export class SignalBridgeService {
     // Read each channel's register using FC 03
     for (const ch of source.channels) {
       conn.transactionId = (conn.transactionId + 1) & 0xFFFF;
+
+      // Track which channel this transaction ID is for
+      conn.pendingRequests.set(conn.transactionId, ch.name);
 
       // MODBUS TCP frame: MBAP Header (7 bytes) + PDU
       const request = Buffer.alloc(12);
@@ -421,29 +429,35 @@ export class SignalBridgeService {
     const byteCount = data.readUInt8(8);
     if (byteCount < 2) return;
 
+    // Read transaction ID from MBAP header (bytes 0-1)
+    const responseTxId = data.readUInt16BE(0);
+    const channelName = conn.pendingRequests.get(responseTxId);
+    conn.pendingRequests.delete(responseTxId);
+
+    if (!channelName) {
+      logger.debug(`Unexpected MODBUS response txId=${responseTxId} on '${source.id}'`);
+      return;
+    }
+
+    // Find the channel config by name
+    const ch = source.channels.find(c => c.name === channelName);
+    if (!ch) return;
+
     // Read register value as signed 16-bit
     const rawValue = data.readInt16BE(9);
-
-    // We need to figure out which channel this response is for
-    // Since we're reading one register at a time, we use a simple round-robin approach
-    // For a more robust implementation, we'd track pending requests by transaction ID
-
-    // For now, distribute responses round-robin to channels
-    const channelIndex = conn.transactionId % source.channels.length;
-    const ch = source.channels[channelIndex];
 
     // Apply scale and offset
     const value = rawValue * ch.scale + ch.offset;
 
     // Add to buffer
-    const buffer = conn.buffers.get(ch.name);
+    const buffer = conn.buffers.get(channelName);
     if (buffer) {
       buffer.push(value);
 
       // Check if batch is ready
       const batchSize = source.batch_size || 64;
       if (buffer.length >= batchSize) {
-        this.feedBatch(source, ch.name, buffer.splice(0, batchSize));
+        this.feedBatch(source, channelName, buffer.splice(0, batchSize));
       }
     }
   }
