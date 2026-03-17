@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
-import SignalChannelCard from '../components/SignalChannelCard.vue';
 import SignalResultBadge from '../components/SignalResultBadge.vue';
 
 interface Node {
@@ -52,12 +51,60 @@ interface SlotInfo {
   inputType: string | null;
 }
 
+interface SourceStatus {
+  id: string;
+  protocol: 'modbus_client' | 'mqtt_subscribe';
+  enabled: boolean;
+  connected: boolean;
+  validation_status: 'ok' | 'mismatch' | 'pending' | 'disabled';
+  mismatched_channels: string[];
+  samples_fed: number;
+  batches_sent: number;
+  last_feed_at: string | null;
+  error: string | null;
+}
+
+interface ChannelDef {
+  name: string;
+  // MODBUS fields
+  register?: number;
+  scale?: number;
+  offset?: number;
+  // MQTT fields
+  json_path?: string;
+}
+
 const nodes = ref<Node[]>([]);
 const selectedNodeId = ref<string | null>(null);
 const signalData = ref<SignalData | null>(null);
 const slotInfo = ref<SlotInfo | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
+
+// Sources state
+const sources = ref<SourceStatus[]>([])
+const sourcesLoading = ref(false)
+const showAddForm = ref(false)
+const addError = ref<string | null>(null)
+const addSuccess = ref<string | null>(null)
+const testingId = ref<string | null>(null)
+const testResult = ref<Record<string, { status: string; error?: string }>>({})
+
+// Add form state
+const form = ref({
+  id: '',
+  protocol: 'modbus_client' as 'modbus_client' | 'mqtt_subscribe',
+  node_id: '',
+  batch_size: 64,
+  // MODBUS fields
+  host: '',
+  port: 502,
+  poll_interval_ms: 100,
+  // MQTT fields
+  topic: '',
+  // channels (start with one empty)
+  channels: [{ name: '', register: 0, scale: 0.001, offset: 0, json_path: '' }] as ChannelDef[]
+})
 
 let pollTimer: number | null = null;
 
@@ -75,6 +122,7 @@ const channels = computed(() => {
 
 onMounted(async () => {
   await fetchNodes();
+  await fetchSources();
 
   // Auto-select first online node
   if (onlineNodes.value.length > 0 && !selectedNodeId.value) {
@@ -83,8 +131,11 @@ onMounted(async () => {
 
   loading.value = false;
 
-  // Start polling for signal data
-  pollTimer = window.setInterval(fetchSignalData, 2000);
+  // Start polling for signal data and sources
+  pollTimer = window.setInterval(async () => {
+    await fetchSignalData();
+    await fetchSources();
+  }, 2000);
 });
 
 onUnmounted(() => {
@@ -99,6 +150,7 @@ watch(selectedNodeId, async (newId) => {
   if (newId) {
     signalData.value = null;
     slotInfo.value = null;
+    form.value.node_id = newId;
     await fetchSlotInfo();
     await fetchSignalData();
   }
@@ -212,6 +264,134 @@ function formatHz(hz: number): string {
   if (hz >= 1000) return `${(hz / 1000).toFixed(1)} kHz`;
   return `${hz} Hz`;
 }
+
+function formatVal(v: number): string {
+  if (v === 0) return '—';
+  if (Math.abs(v) < 0.001) return v.toExponential(2);
+  return v.toFixed(4);
+}
+
+async function fetchSources() {
+  try {
+    const r = await fetch('/api/signal-sources', { signal: AbortSignal.timeout(2000) })
+    if (r.ok) {
+      const data = await r.json()
+      sources.value = data.sources || []
+    }
+  } catch { /* silent */ }
+}
+
+async function deleteSource(id: string) {
+  if (!confirm(`Remove source '${id}'?`)) return
+  try {
+    const r = await fetch(`/api/signal-sources/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(3000) })
+    if (r.ok) await fetchSources()
+  } catch { /* silent */ }
+}
+
+async function testSource(id: string) {
+  testingId.value = id
+  testResult.value[id] = { status: 'testing' }
+  try {
+    const r = await fetch(`/api/signal-sources/${id}/test`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(5000)
+    })
+    if (r.ok) {
+      const data = await r.json()
+      testResult.value[id] = {
+        status: data.validation_status,
+        error: data.mismatched_channels?.length
+          ? `Mismatch: ${data.mismatched_channels.join(', ')}`
+          : data.error
+      }
+    } else {
+      testResult.value[id] = { status: 'error', error: `HTTP ${r.status}` }
+    }
+  } catch (e) {
+    testResult.value[id] = { status: 'error', error: e instanceof Error ? e.message : 'Failed' }
+  } finally {
+    testingId.value = null
+  }
+}
+
+function addChannel() {
+  form.value.channels.push({ name: '', register: 0, scale: 0.001, offset: 0, json_path: '' })
+}
+
+function removeChannel(idx: number) {
+  form.value.channels.splice(idx, 1)
+}
+
+function resetForm() {
+  form.value = {
+    id: '', protocol: 'modbus_client', node_id: selectedNodeId.value || '',
+    batch_size: 64, host: '', port: 502, poll_interval_ms: 100, topic: '',
+    channels: [{ name: '', register: 0, scale: 0.001, offset: 0, json_path: '' }]
+  }
+  addError.value = null
+  addSuccess.value = null
+}
+
+async function submitSource() {
+  addError.value = null
+  addSuccess.value = null
+  sourcesLoading.value = true
+
+  // Basic validation
+  if (!form.value.id.trim()) { addError.value = 'ID is required'; sourcesLoading.value = false; return }
+  if (!form.value.node_id) { addError.value = 'Node is required'; sourcesLoading.value = false; return }
+  if (form.value.channels.length === 0) { addError.value = 'At least one channel required'; sourcesLoading.value = false; return }
+  if (form.value.channels.some(c => !c.name.trim())) { addError.value = 'All channels need a name'; sourcesLoading.value = false; return }
+  if (form.value.protocol === 'modbus_client' && !form.value.host.trim()) { addError.value = 'Host is required for MODBUS'; sourcesLoading.value = false; return }
+  if (form.value.protocol === 'mqtt_subscribe' && !form.value.topic.trim()) { addError.value = 'Topic is required for MQTT'; sourcesLoading.value = false; return }
+
+  // Build payload
+  const payload: Record<string, unknown> = {
+    id: form.value.id.trim(),
+    protocol: form.value.protocol,
+    node_id: form.value.node_id,
+    batch_size: form.value.batch_size,
+    enabled: true,
+    channels: form.value.channels.map(ch => {
+      if (form.value.protocol === 'modbus_client') {
+        return { name: ch.name.trim(), register: Number(ch.register), scale: Number(ch.scale), offset: Number(ch.offset) }
+      } else {
+        return { name: ch.name.trim(), json_path: ch.json_path?.trim() || ch.name.trim() }
+      }
+    })
+  }
+  if (form.value.protocol === 'modbus_client') {
+    payload.host = form.value.host.trim()
+    payload.port = Number(form.value.port)
+    payload.poll_interval_ms = Number(form.value.poll_interval_ms)
+  } else {
+    payload.topic = form.value.topic.trim()
+    payload.payload_format = 'json'
+  }
+
+  try {
+    const r = await fetch('/api/signal-sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000)
+    })
+    const data = await r.json()
+    if (r.ok && data.success) {
+      addSuccess.value = `Source '${payload.id}' saved`
+      showAddForm.value = false
+      resetForm()
+      await fetchSources()
+    } else {
+      addError.value = data.message || data.error || 'Save failed'
+    }
+  } catch (e) {
+    addError.value = e instanceof Error ? e.message : 'Request failed'
+  } finally {
+    sourcesLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -301,19 +481,32 @@ function formatHz(hz: number): string {
           </div>
         </div>
 
-        <!-- Channels Grid -->
-        <div class="channels-grid">
-          <SignalChannelCard
-            v-for="channel in channels"
-            :key="channel.name"
-            :name="channel.name"
-            :rms="channel.rms"
-            :peak="channel.peak"
-            :mean="channel.mean"
-            :windowReady="channel.window_ready"
-            :sampleCount="channel.sample_count"
-          />
-        </div>
+        <!-- Feature Stats Table -->
+        <table class="channel-table" v-if="channels.length > 0">
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th>RMS</th>
+              <th>Peak</th>
+              <th>Mean</th>
+              <th>Buffer</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="ch in channels" :key="ch.name">
+              <td class="ch-name">{{ ch.name }}</td>
+              <td class="ch-value">{{ formatVal(ch.rms) }}</td>
+              <td class="ch-value">{{ formatVal(ch.peak) }}</td>
+              <td class="ch-value">{{ formatVal(ch.mean) }}</td>
+              <td>
+                <span class="ready-dot" :class="ch.window_ready ? 'ready' : 'waiting'">
+                  {{ ch.window_ready ? '● Ready' : '○ Filling' }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="muted" v-else>Waiting for signal data...</div>
       </section>
 
       <!-- No Signal Buffer -->
@@ -342,6 +535,171 @@ function formatHz(hz: number): string {
 
         <div class="result-empty" v-else>
           <p>No inference results available.</p>
+        </div>
+      </section>
+
+      <!-- Signal Sources Section -->
+      <section class="section sources-section">
+        <div class="section-header">
+          <h3>Signal Sources</h3>
+          <button class="add-btn" @click="showAddForm = !showAddForm">
+            {{ showAddForm ? '✕ Cancel' : '+ Add Source' }}
+          </button>
+        </div>
+
+        <!-- Sources list -->
+        <div v-if="sources.length === 0 && !showAddForm" class="muted">
+          No signal sources configured. Click "+ Add Source" to connect MODBUS or MQTT.
+        </div>
+
+        <div class="source-list">
+          <div v-for="src in sources" :key="src.id" class="source-row">
+            <div class="source-left">
+              <span class="source-protocol" :class="src.protocol === 'modbus_client' ? 'modbus' : 'mqtt'">
+                {{ src.protocol === 'modbus_client' ? 'MODBUS' : 'MQTT' }}
+              </span>
+              <span class="source-id">{{ src.id }}</span>
+              <span class="source-detail">{{ src.samples_fed ?? 0 }} samples</span>
+              <span v-if="src.last_feed_at" class="source-detail">
+                · last {{ new Date(src.last_feed_at).toLocaleTimeString() }}
+              </span>
+            </div>
+
+            <div class="source-right">
+              <!-- Validation status -->
+              <span class="val-badge" :class="src.validation_status">
+                {{ src.validation_status === 'ok' ? '● ok'
+                 : src.validation_status === 'mismatch' ? '⚠ mismatch'
+                 : src.validation_status === 'pending' ? '◌ pending'
+                 : '✕ disabled' }}
+              </span>
+
+              <!-- Connected indicator -->
+              <span class="conn-dot" :class="src.connected ? 'connected' : 'disconnected'">
+                {{ src.connected ? '● live' : '○ off' }}
+              </span>
+
+              <!-- Test result inline -->
+              <span v-if="testResult[src.id]" class="test-result"
+                :class="testResult[src.id].status === 'ok' ? 'ok' : 'err'">
+                {{ testResult[src.id].status === 'ok' ? '✓ ok'
+                 : testResult[src.id].status === 'testing' ? '…'
+                 : '✗ ' + testResult[src.id].error }}
+              </span>
+
+              <!-- Error tooltip -->
+              <span v-if="src.error && src.validation_status !== 'ok'" class="source-error" :title="src.error">⚠</span>
+
+              <button class="icon-btn" @click="testSource(src.id)"
+                :disabled="testingId === src.id" title="Test connection">
+                {{ testingId === src.id ? '…' : '⟳' }}
+              </button>
+              <button class="icon-btn danger" @click="deleteSource(src.id)" title="Remove source">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add form -->
+        <div v-if="showAddForm" class="add-form">
+          <div class="form-row">
+            <div class="field">
+              <label>Protocol</label>
+              <select v-model="form.protocol" @change="resetForm(); form.protocol = ($event.target as HTMLSelectElement).value as 'modbus_client' | 'mqtt_subscribe'">
+                <option value="modbus_client">MODBUS TCP</option>
+                <option value="mqtt_subscribe">MQTT Subscribe</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Source ID</label>
+              <input v-model="form.id" type="text" placeholder="e.g. plc-line1" />
+            </div>
+            <div class="field">
+              <label>Node</label>
+              <select v-model="form.node_id">
+                <option value="">Select node...</option>
+                <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
+              </select>
+            </div>
+            <div class="field field-sm">
+              <label>Batch Size</label>
+              <input v-model.number="form.batch_size" type="number" min="1" max="512" />
+            </div>
+          </div>
+
+          <!-- MODBUS fields -->
+          <div class="form-row" v-if="form.protocol === 'modbus_client'">
+            <div class="field field-lg">
+              <label>Host</label>
+              <input v-model="form.host" type="text" placeholder="192.168.1.127" />
+            </div>
+            <div class="field field-sm">
+              <label>Port</label>
+              <input v-model.number="form.port" type="number" min="1" max="65535" />
+            </div>
+            <div class="field field-sm">
+              <label>Poll (ms)</label>
+              <input v-model.number="form.poll_interval_ms" type="number" min="10" max="10000" />
+            </div>
+          </div>
+
+          <!-- MQTT fields -->
+          <div class="form-row" v-if="form.protocol === 'mqtt_subscribe'">
+            <div class="field field-xl">
+              <label>Topic</label>
+              <input v-model="form.topic" type="text" placeholder="cira/sensors/system" />
+            </div>
+          </div>
+
+          <!-- Channels -->
+          <div class="channels-editor">
+            <div class="channels-header">
+              <span class="field-label">Channels</span>
+              <button class="add-ch-btn" @click="addChannel" :disabled="form.channels.length >= 16">
+                + Add Channel
+              </button>
+            </div>
+
+            <div class="channel-row" v-for="(ch, idx) in form.channels" :key="idx">
+              <div class="field field-sm">
+                <input v-model="ch.name" type="text" placeholder="name" />
+              </div>
+
+              <!-- MODBUS channel fields -->
+              <template v-if="form.protocol === 'modbus_client'">
+                <div class="field field-xs">
+                  <input v-model.number="ch.register" type="number" min="0" placeholder="reg" title="Register address" />
+                </div>
+                <div class="field field-xs">
+                  <input v-model.number="ch.scale" type="number" step="0.001" placeholder="scale" title="Scale factor (value = raw × scale)" />
+                </div>
+                <div class="field field-xs">
+                  <input v-model.number="ch.offset" type="number" step="0.1" placeholder="offset" title="Offset (value = raw × scale + offset)" />
+                </div>
+              </template>
+
+              <!-- MQTT channel fields -->
+              <template v-if="form.protocol === 'mqtt_subscribe'">
+                <div class="field field-lg">
+                  <input v-model="ch.json_path" type="text" placeholder="json_path (e.g. cpu_temp)" title="Dot-notation path in JSON payload" />
+                </div>
+              </template>
+
+              <button class="icon-btn danger" @click="removeChannel(idx)"
+                :disabled="form.channels.length === 1" title="Remove channel">✕</button>
+            </div>
+          </div>
+
+          <!-- Form footer -->
+          <div class="form-footer">
+            <div class="form-error" v-if="addError">{{ addError }}</div>
+            <div class="form-success" v-if="addSuccess">{{ addSuccess }}</div>
+            <div class="form-actions">
+              <button class="cancel-btn" @click="showAddForm = false; resetForm()">Cancel</button>
+              <button class="save-btn" @click="submitSource" :disabled="sourcesLoading">
+                {{ sourcesLoading ? 'Saving...' : 'Save & Reload' }}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -561,17 +919,140 @@ function formatHz(hz: number): string {
   font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
 }
 
-.channels-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
-}
-
 .result-container {
   background: #0F172A;
   border-radius: 8px;
   padding: 16px;
 }
+
+/* Channel Stats Table */
+.channel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.channel-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: #64748B;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid #334155;
+}
+.channel-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #1E293B;
+  color: #E2E8F0;
+}
+.channel-table tbody tr:last-child td { border-bottom: none; }
+.channel-table tbody tr:hover { background: rgba(99,102,241,0.05); }
+.ch-name {
+  font-family: 'JetBrains Mono', monospace;
+  color: #22D3EE;
+  font-weight: 500;
+}
+.ch-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8125rem;
+}
+.ready-dot { font-size: 0.75rem; font-weight: 600; }
+.ready-dot.ready  { color: #10B981; }
+.ready-dot.waiting { color: #F59E0B; }
+.muted { color: #64748B; font-size: 0.875rem; padding: 12px 0; }
+
+/* Sources section */
+.source-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.source-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; background: #0F172A; border-radius: 8px;
+  border: 1px solid #1E293B; gap: 12px; flex-wrap: wrap;
+}
+.source-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.source-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.source-protocol {
+  padding: 2px 8px; border-radius: 4px; font-size: 0.65rem;
+  font-weight: 700; text-transform: uppercase;
+}
+.source-protocol.modbus { background: #1e3a5f; color: #22D3EE; }
+.source-protocol.mqtt   { background: #2d1b69; color: #A78BFA; }
+.source-id { font-family: monospace; font-size: 0.875rem; color: #E2E8F0; font-weight: 500; }
+.source-detail { font-size: 0.75rem; color: #64748B; }
+.source-error { color: #F59E0B; cursor: help; }
+.val-badge { font-size: 0.7rem; font-weight: 600; }
+.val-badge.ok       { color: #10B981; }
+.val-badge.mismatch { color: #EF4444; }
+.val-badge.pending  { color: #F59E0B; }
+.val-badge.disabled { color: #64748B; }
+.conn-dot { font-size: 0.7rem; }
+.conn-dot.connected    { color: #10B981; }
+.conn-dot.disconnected { color: #475569; }
+.test-result { font-size: 0.7rem; font-weight: 600; }
+.test-result.ok  { color: #10B981; }
+.test-result.err { color: #EF4444; }
+.add-btn {
+  padding: 6px 14px; background: #6366F1; color: white;
+  border: none; border-radius: 6px; cursor: pointer; font-size: 0.8125rem;
+}
+.add-btn:hover { background: #4F46E5; }
+.icon-btn {
+  width: 28px; height: 28px; background: #1E293B; border: 1px solid #334155;
+  border-radius: 4px; cursor: pointer; color: #94A3B8; font-size: 0.875rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.icon-btn:hover { background: #334155; color: #E2E8F0; }
+.icon-btn.danger:hover { background: rgba(239,68,68,0.15); color: #EF4444; border-color: #EF4444; }
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Add form */
+.add-form {
+  margin-top: 16px; padding: 16px; background: #0F172A;
+  border-radius: 8px; border: 1px solid #334155;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 120px; }
+.field-sm  { flex: 0 0 90px; }
+.field-xs  { flex: 0 0 75px; }
+.field-lg  { flex: 0 0 200px; }
+.field-xl  { flex: 1; min-width: 200px; }
+.field label, .field-label {
+  font-size: 0.7rem; font-weight: 600; color: #64748B; text-transform: uppercase;
+}
+.field input, .field select {
+  padding: 7px 10px; background: #1E293B; border: 1px solid #334155;
+  border-radius: 5px; color: #E2E8F0; font-size: 0.8125rem;
+}
+.field input:focus, .field select:focus {
+  outline: none; border-color: #6366F1;
+}
+.field input::placeholder { color: #475569; }
+.channels-editor { display: flex; flex-direction: column; gap: 8px; }
+.channels-header { display: flex; justify-content: space-between; align-items: center; }
+.add-ch-btn {
+  padding: 4px 10px; background: transparent; border: 1px solid #334155;
+  border-radius: 4px; color: #94A3B8; cursor: pointer; font-size: 0.75rem;
+}
+.add-ch-btn:hover { border-color: #6366F1; color: #6366F1; }
+.add-ch-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.channel-row { display: flex; gap: 8px; align-items: flex-end; }
+.channel-row .field input { font-family: monospace; font-size: 0.8rem; }
+.form-footer { display: flex; flex-direction: column; gap: 8px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.cancel-btn {
+  padding: 8px 18px; background: transparent; border: 1px solid #334155;
+  border-radius: 6px; color: #94A3B8; cursor: pointer; font-size: 0.875rem;
+}
+.cancel-btn:hover { border-color: #94A3B8; color: #E2E8F0; }
+.save-btn {
+  padding: 8px 18px; background: #6366F1; color: white;
+  border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 500;
+}
+.save-btn:hover:not(:disabled) { background: #4F46E5; }
+.save-btn:disabled { background: #334155; color: #64748B; cursor: not-allowed; }
+.form-error { color: #EF4444; font-size: 0.8125rem; }
+.form-success { color: #10B981; font-size: 0.8125rem; }
 
 @media (max-width: 768px) {
   .page-header {
@@ -592,8 +1073,24 @@ function formatHz(hz: number): string {
     gap: 16px;
   }
 
-  .channels-grid {
-    grid-template-columns: 1fr;
+  .channel-table {
+    font-size: 0.8rem;
+  }
+
+  .channel-table th,
+  .channel-table td {
+    padding: 8px 8px;
+  }
+
+  .source-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .source-right {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 8px;
   }
 }
 </style>
