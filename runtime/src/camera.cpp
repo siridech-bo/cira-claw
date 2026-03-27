@@ -4,6 +4,11 @@
  * Cross-platform video capture using OpenCV VideoCapture.
  * Works on Windows (DirectShow), Linux (V4L2), and macOS (AVFoundation).
  *
+ * Architecture: Double-buffered with separate capture and inference threads
+ * - Capture thread: Fast loop (~30fps), writes to buffer A/B alternately
+ * - Inference thread: Processes frames from the other buffer, doesn't block capture
+ * - Stream server: Reads from the latest complete buffer
+ *
  * (c) CiRA Robotics / KMITL 2026
  */
 
@@ -73,12 +78,120 @@ static double get_time_ms(void) {
 }
 
 /* Store VideoCapture pointer - using a simple global for now */
-/* TODO: Better approach would be to extend cira_ctx with a void* camera_handle */
 static cv::VideoCapture* g_capture = NULL;
 static camera_state_t g_cam_state = {NULL, 0, 0, 0};
 
 /**
- * Camera capture thread (actual implementation).
+ * Inference thread - processes frames without blocking capture.
+ * Waits for signal from capture thread, then runs AI inference.
+ */
+static void* inference_thread_func(void* arg) {
+    cira_ctx* ctx = static_cast<cira_ctx*>(arg);
+
+    fprintf(stderr, "Inference thread started\n");
+
+    double last_time = get_time_ms();
+    int inference_count = 0;
+
+    while (ctx->inference_running) {
+        /* Wait for frame ready signal */
+        pthread_mutex_lock(&ctx->frame_mutex);
+        while (!ctx->frame_ready && ctx->inference_running) {
+            /* Wait with timeout to allow checking inference_running flag */
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_nsec += 100000000; /* 100ms timeout */
+            if (ts.tv_nsec >= 1000000000) {
+                ts.tv_sec++;
+                ts.tv_nsec -= 1000000000;
+            }
+            pthread_cond_timedwait(&ctx->frame_cond, &ctx->frame_mutex, &ts);
+        }
+
+        if (!ctx->inference_running) {
+            pthread_mutex_unlock(&ctx->frame_mutex);
+            break;
+        }
+
+        /* Get the read buffer (the one not being written to) */
+        int read_idx = ctx->read_buffer_idx;
+        uint8_t* frame_data = ctx->frame_buffers[read_idx];
+        int w = ctx->frame_w;
+        int h = ctx->frame_h;
+        ctx->frame_ready = 0;  /* Clear flag */
+        pthread_mutex_unlock(&ctx->frame_mutex);
+
+        if (!frame_data || w <= 0 || h <= 0) {
+            continue;
+        }
+
+        /* Run inference if IMAGE slot model is loaded */
+        if (SLOT_FORMAT(ctx, MODEL_SLOT_IMAGE) != CIRA_FORMAT_UNKNOWN &&
+            SLOT_HANDLE(ctx, MODEL_SLOT_IMAGE) != NULL &&
+            !ctx->model_swapping) {
+
+            /* Lock IMAGE slot mutex to prevent model unload during inference */
+            if (pthread_mutex_trylock(&SLOT_MUTEX(ctx, MODEL_SLOT_IMAGE)) == 0) {
+                /* Double-check after acquiring lock */
+                if (SLOT_HANDLE(ctx, MODEL_SLOT_IMAGE) != NULL && !ctx->model_swapping) {
+                    int result = CIRA_ERROR;
+
+                    switch (SLOT_FORMAT(ctx, MODEL_SLOT_IMAGE)) {
+#ifdef CIRA_DARKNET_ENABLED
+                        case CIRA_FORMAT_DARKNET:
+                            result = darknet_predict(ctx, frame_data, w, h, 3);
+                            break;
+#endif
+#ifdef CIRA_NCNN_ENABLED
+                        case CIRA_FORMAT_NCNN:
+                            result = ncnn_predict(ctx, frame_data, w, h, 3);
+                            break;
+#endif
+#ifdef CIRA_ONNX_ENABLED
+                        case CIRA_FORMAT_ONNX:
+                            result = onnx_predict(ctx, frame_data, w, h, 3);
+                            break;
+#endif
+#ifdef CIRA_TRT_ENABLED
+                        case CIRA_FORMAT_TENSORRT:
+                            result = trt_predict(ctx, frame_data, w, h, 3);
+                            break;
+#endif
+                        default:
+                            break;
+                    }
+
+                    if (result == CIRA_OK) {
+                        ctx->total_frames++;
+                        inference_count++;
+                    } else if (result != CIRA_ERROR) {
+                        static int err_count = 0;
+                        if (++err_count % 100 == 1) {
+                            fprintf(stderr, "Inference error: %d\n", result);
+                        }
+                    }
+                }
+                pthread_mutex_unlock(&SLOT_MUTEX(ctx, MODEL_SLOT_IMAGE));
+            }
+        }
+
+        /* Calculate inference FPS */
+        double now = get_time_ms();
+        double elapsed = now - last_time;
+        if (elapsed >= 1000.0) {
+            ctx->inference_fps = (float)(inference_count * 1000.0 / elapsed);
+            inference_count = 0;
+            last_time = now;
+        }
+    }
+
+    fprintf(stderr, "Inference thread stopped\n");
+    return NULL;
+}
+
+/**
+ * Camera capture thread - fast loop, doesn't wait for inference.
+ * Captures frames and stores to double buffer, signals inference thread.
  */
 static void* camera_thread_func_impl(void* arg) {
     cira_ctx* ctx = static_cast<cira_ctx*>(arg);
@@ -111,74 +224,48 @@ static void* camera_thread_func_impl(void* arg) {
         /* Convert BGR to RGB */
         cv::cvtColor(frame, rgb, cv::COLOR_BGR2RGB);
 
-        /* Store frame for streaming server */
-        cira_store_frame(ctx, rgb.data, rgb.cols, rgb.rows);
+        /* Store frame to write buffer (double-buffered) */
+        pthread_mutex_lock(&ctx->frame_mutex);
+
+        int write_idx = ctx->write_buffer_idx;
+        int frame_size = rgb.cols * rgb.rows * 3;
+
+        /* Allocate or reallocate buffer if needed */
+        if (!ctx->frame_buffers[write_idx] || ctx->frame_size != frame_size) {
+            if (ctx->frame_buffers[write_idx]) {
+                free(ctx->frame_buffers[write_idx]);
+            }
+            ctx->frame_buffers[write_idx] = (uint8_t*)malloc(frame_size);
+        }
+
+        if (ctx->frame_buffers[write_idx]) {
+            memcpy(ctx->frame_buffers[write_idx], rgb.data, frame_size);
+            ctx->frame_w = rgb.cols;
+            ctx->frame_h = rgb.rows;
+            ctx->frame_size = frame_size;
+
+            /* Swap buffers: write becomes read, read becomes write */
+            ctx->read_buffer_idx = write_idx;
+            ctx->write_buffer_idx = 1 - write_idx;
+
+            /* Update legacy pointer for stream server compatibility */
+            ctx->frame_buffer = ctx->frame_buffers[ctx->read_buffer_idx];
+
+            /* Signal inference thread that a new frame is ready */
+            ctx->frame_ready = 1;
+            pthread_cond_signal(&ctx->frame_cond);
+        }
+
+        pthread_mutex_unlock(&ctx->frame_mutex);
 
         /* Write frame to temp file periodically for file-based transfer */
-        /* Write every 3 frames (~10 FPS at 30 FPS capture) to reduce disk I/O */
         static int write_counter = 0;
         if (++write_counter >= 3) {
             write_counter = 0;
-            cira_write_frame_file(ctx, 1);  /* 1 = annotated */
+            cira_write_frame_file(ctx, 1);
         }
 
-        /* Run inference if IMAGE slot model is loaded and not being swapped */
-        if (SLOT_FORMAT(ctx, MODEL_SLOT_IMAGE) != CIRA_FORMAT_UNKNOWN &&
-            SLOT_HANDLE(ctx, MODEL_SLOT_IMAGE) != NULL &&
-            !ctx->model_swapping) {
-
-            /* Lock IMAGE slot mutex to prevent model unload during inference */
-            if (pthread_mutex_trylock(&SLOT_MUTEX(ctx, MODEL_SLOT_IMAGE)) == 0) {
-                /* Double-check after acquiring lock */
-                if (SLOT_HANDLE(ctx, MODEL_SLOT_IMAGE) != NULL && !ctx->model_swapping) {
-                    /* Call predict with RGB data (always using IMAGE slot) */
-                    int result = CIRA_ERROR;
-
-                    switch (SLOT_FORMAT(ctx, MODEL_SLOT_IMAGE)) {
-#ifdef CIRA_DARKNET_ENABLED
-                        case CIRA_FORMAT_DARKNET:
-                            /* Note: darknet_predict would need slot parameter */
-                            result = darknet_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
-                            break;
-#endif
-#ifdef CIRA_NCNN_ENABLED
-                        case CIRA_FORMAT_NCNN:
-                            /* Note: ncnn_predict would need slot parameter */
-                            result = ncnn_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
-                            break;
-#endif
-#ifdef CIRA_ONNX_ENABLED
-                        case CIRA_FORMAT_ONNX:
-                            result = onnx_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
-                            break;
-#endif
-#ifdef CIRA_TRT_ENABLED
-                        case CIRA_FORMAT_TENSORRT:
-                            /* Note: trt_predict would need slot parameter */
-                            result = trt_predict(ctx, rgb.data, rgb.cols, rgb.rows, 3);
-                            break;
-#endif
-                        default:
-                            break;
-                    }
-
-                    if (result == CIRA_OK) {
-                        /* Increment total frames for stats */
-                        ctx->total_frames++;
-                    } else if (result != CIRA_ERROR) {
-                        /* Log inference errors occasionally */
-                        static int err_count = 0;
-                        if (++err_count % 100 == 1) {
-                            fprintf(stderr, "Inference error: %d\n", result);
-                        }
-                    }
-                }
-                pthread_mutex_unlock(&SLOT_MUTEX(ctx, MODEL_SLOT_IMAGE));
-            }
-            /* If trylock fails, model is being swapped - skip this frame */
-        }
-
-        /* Calculate FPS */
+        /* Calculate capture FPS */
         frame_count++;
         double now = get_time_ms();
         double elapsed = now - last_time;
@@ -189,11 +276,11 @@ static void* camera_thread_func_impl(void* arg) {
             last_time = now;
 
             /* Log FPS periodically */
-            fprintf(stderr, "Camera FPS: %.1f, Detections: %d\n",
-                    ctx->current_fps, ctx->num_detections);
+            fprintf(stderr, "Capture FPS: %.1f, Inference FPS: %.1f, Detections: %d\n",
+                    ctx->current_fps, ctx->inference_fps, ctx->num_detections);
         }
 
-        /* Small sleep to prevent CPU spinning */
+        /* Small sleep to prevent CPU spinning - capture is now decoupled from inference */
         usleep(1000);  /* 1ms */
     }
 
@@ -202,7 +289,7 @@ static void* camera_thread_func_impl(void* arg) {
 }
 
 /**
- * Start camera capture.
+ * Start camera capture with separate inference thread.
  */
 extern "C" int camera_start(cira_ctx* ctx, int device_id) {
     if (!ctx) return CIRA_ERROR_INPUT;
@@ -215,14 +302,23 @@ extern "C" int camera_start(cira_ctx* ctx, int device_id) {
 
     fprintf(stderr, "Opening camera %d...\n", device_id);
 
+    /* Initialize double-buffer state */
+    ctx->frame_buffers[0] = NULL;
+    ctx->frame_buffers[1] = NULL;
+    ctx->write_buffer_idx = 0;
+    ctx->read_buffer_idx = 1;
+    ctx->frame_ready = 0;
+    ctx->inference_fps = 0.0f;
+
+    /* Initialize condition variable */
+    pthread_cond_init(&ctx->frame_cond, NULL);
+
     /* Create VideoCapture */
     g_capture = new cv::VideoCapture();
 
-    /* Open camera - OpenCV auto-selects backend (DirectShow on Windows, V4L2 on Linux) */
+    /* Open camera - OpenCV auto-selects backend */
 #ifdef _WIN32
-    /* On Windows, use DirectShow backend explicitly for better compatibility */
     if (!g_capture->open(device_id, cv::CAP_DSHOW)) {
-        /* Fall back to default backend */
         if (!g_capture->open(device_id)) {
             fprintf(stderr, "Failed to open camera %d\n", device_id);
             delete g_capture;
@@ -243,7 +339,7 @@ extern "C" int camera_start(cira_ctx* ctx, int device_id) {
     g_capture->set(cv::CAP_PROP_FRAME_WIDTH, DEFAULT_WIDTH);
     g_capture->set(cv::CAP_PROP_FRAME_HEIGHT, DEFAULT_HEIGHT);
 
-    /* Get actual resolution (may differ from requested) */
+    /* Get actual resolution */
     g_cam_state.width = static_cast<int>(g_capture->get(cv::CAP_PROP_FRAME_WIDTH));
     g_cam_state.height = static_cast<int>(g_capture->get(cv::CAP_PROP_FRAME_HEIGHT));
     g_cam_state.device_id = device_id;
@@ -252,26 +348,41 @@ extern "C" int camera_start(cira_ctx* ctx, int device_id) {
     fprintf(stderr, "Camera opened: device %d, resolution %dx%d\n",
             device_id, g_cam_state.width, g_cam_state.height);
 
-    /* Start capture thread */
-    ctx->camera_running = 1;
-    ctx->current_camera = device_id;
-
-    int ret = pthread_create(&ctx->camera_thread, NULL, camera_thread_func_impl, ctx);
+    /* Start inference thread first */
+    ctx->inference_running = 1;
+    int ret = pthread_create(&ctx->inference_thread, NULL, inference_thread_func, ctx);
     if (ret != 0) {
-        fprintf(stderr, "Failed to create camera thread: %d\n", ret);
-        ctx->camera_running = 0;
+        fprintf(stderr, "Failed to create inference thread: %d\n", ret);
+        ctx->inference_running = 0;
         g_capture->release();
         delete g_capture;
         g_capture = NULL;
         return CIRA_ERROR;
     }
 
-    fprintf(stderr, "Camera capture started\n");
+    /* Start capture thread */
+    ctx->camera_running = 1;
+    ctx->current_camera = device_id;
+
+    ret = pthread_create(&ctx->camera_thread, NULL, camera_thread_func_impl, ctx);
+    if (ret != 0) {
+        fprintf(stderr, "Failed to create camera thread: %d\n", ret);
+        ctx->camera_running = 0;
+        ctx->inference_running = 0;
+        pthread_cond_signal(&ctx->frame_cond);  /* Wake up inference thread */
+        pthread_join(ctx->inference_thread, NULL);
+        g_capture->release();
+        delete g_capture;
+        g_capture = NULL;
+        return CIRA_ERROR;
+    }
+
+    fprintf(stderr, "Camera capture started (double-buffered with separate inference thread)\n");
     return CIRA_OK;
 }
 
 /**
- * Stop camera capture.
+ * Stop camera capture and inference threads.
  */
 extern "C" int camera_stop(cira_ctx* ctx) {
     if (!ctx) return CIRA_ERROR_INPUT;
@@ -283,12 +394,19 @@ extern "C" int camera_stop(cira_ctx* ctx) {
 
     fprintf(stderr, "Stopping camera...\n");
 
-    /* Signal thread to stop */
+    /* Signal threads to stop */
     ctx->camera_running = 0;
+    ctx->inference_running = 0;
     ctx->current_camera = -1;
 
-    /* Wait for thread to finish */
+    /* Wake up inference thread if it's waiting */
+    pthread_mutex_lock(&ctx->frame_mutex);
+    pthread_cond_signal(&ctx->frame_cond);
+    pthread_mutex_unlock(&ctx->frame_mutex);
+
+    /* Wait for threads to finish */
     pthread_join(ctx->camera_thread, NULL);
+    pthread_join(ctx->inference_thread, NULL);
 
     /* Release VideoCapture */
     if (g_capture) {
@@ -296,6 +414,20 @@ extern "C" int camera_stop(cira_ctx* ctx) {
         delete g_capture;
         g_capture = NULL;
     }
+
+    /* Free double buffers */
+    if (ctx->frame_buffers[0]) {
+        free(ctx->frame_buffers[0]);
+        ctx->frame_buffers[0] = NULL;
+    }
+    if (ctx->frame_buffers[1]) {
+        free(ctx->frame_buffers[1]);
+        ctx->frame_buffers[1] = NULL;
+    }
+    ctx->frame_buffer = NULL;
+
+    /* Destroy condition variable */
+    pthread_cond_destroy(&ctx->frame_cond);
 
     /* Clear state */
     g_cam_state.cap = NULL;

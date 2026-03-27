@@ -1,4 +1,4 @@
 @echo off
 echo Starting CiRA Gateway...
-cd /d "D:\CiRA Claw\cira-edge"
+cd /d "%~dp0"
 npm run dev

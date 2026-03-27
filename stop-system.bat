@@ -2,7 +2,7 @@
 echo Stopping CiRA Edge System...
 echo.
 
-:: Kill Node.js processes
+:: Kill Node.js processes (gateway and dashboard)
 taskkill /F /IM node.exe 2>nul
 if %errorlevel%==0 (
     echo Node.js processes stopped.

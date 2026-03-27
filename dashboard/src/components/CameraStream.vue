@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 
 interface Props {
   host: string;
@@ -20,19 +20,29 @@ const emit = defineEmits<{
   (e: 'modeChange', mode: 'mjpeg' | 'polling'): void;
 }>();
 
+// Canvas for polling mode (flicker-free)
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+const containerRef = ref<HTMLDivElement | null>(null);
+let ctx: CanvasRenderingContext2D | null = null;
+
+// State
 const activeMode = ref<'mjpeg' | 'polling'>(props.mode === 'polling' ? 'polling' : 'mjpeg');
-const imgSrc = ref('');
+const mjpegSrc = ref('');
 const loading = ref(true);
 const errorCount = ref(0);
 const lastSequence = ref(0);
 const streamError = ref(false);
 const lastFrameTime = ref(0);
+const hasFrame = ref(false);
 
 let pollTimer: number | null = null;
 let connectionTimeout: number | null = null;
 let mjpegWatchdog: number | null = null;
+let resizeObserver: ResizeObserver | null = null;
+let pendingBlobUrl: string | null = null;
 
-const MJPEG_STALL_TIMEOUT = 8000; // Consider stream stalled if no frame for 8 seconds
+// Higher timeout to handle slow inference (model inference can take 50-100ms per frame)
+const MJPEG_STALL_TIMEOUT = 10000;
 
 const baseUrl = computed(() => `http://${props.host}:${props.port}`);
 
@@ -45,7 +55,66 @@ const frameUrl = computed(() => {
   return `${baseUrl.value}/frame/latest`;
 });
 
-// Clear connection timeout
+// Initialize canvas for polling mode
+function initCanvas() {
+  if (!canvasRef.value) return;
+  ctx = canvasRef.value.getContext('2d', {
+    alpha: false,
+    desynchronized: true,
+  });
+  if (ctx) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'medium';
+  }
+  updateCanvasSize();
+}
+
+function updateCanvasSize() {
+  if (!canvasRef.value || !containerRef.value) return;
+
+  const rect = containerRef.value.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+
+  canvasRef.value.width = rect.width * dpr;
+  canvasRef.value.height = rect.height * dpr;
+
+  if (ctx) {
+    ctx.scale(dpr, dpr);
+  }
+}
+
+// Draw frame to canvas (for polling mode)
+function drawFrame(img: HTMLImageElement) {
+  if (!ctx || !canvasRef.value || !containerRef.value) return;
+
+  const rect = containerRef.value.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+
+  const imgAspect = img.naturalWidth / img.naturalHeight;
+  const canvasAspect = canvasWidth / canvasHeight;
+
+  let drawWidth: number, drawHeight: number, drawX: number, drawY: number;
+
+  if (imgAspect > canvasAspect) {
+    drawWidth = canvasWidth;
+    drawHeight = canvasWidth / imgAspect;
+    drawX = 0;
+    drawY = (canvasHeight - drawHeight) / 2;
+  } else {
+    drawHeight = canvasHeight;
+    drawWidth = canvasHeight * imgAspect;
+    drawX = (canvasWidth - drawWidth) / 2;
+    drawY = 0;
+  }
+
+  ctx.fillStyle = '#0F172A';
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+
+  hasFrame.value = true;
+}
+
 function clearConnectionTimeout() {
   if (connectionTimeout) {
     clearTimeout(connectionTimeout);
@@ -53,7 +122,6 @@ function clearConnectionTimeout() {
   }
 }
 
-// Clear MJPEG watchdog
 function clearMjpegWatchdog() {
   if (mjpegWatchdog) {
     clearInterval(mjpegWatchdog);
@@ -61,7 +129,7 @@ function clearMjpegWatchdog() {
   }
 }
 
-// Start MJPEG watchdog to detect stalled streams
+// MJPEG watchdog - detect truly stalled streams (not just slow inference)
 function startMjpegWatchdog() {
   clearMjpegWatchdog();
   lastFrameTime.value = Date.now();
@@ -71,64 +139,101 @@ function startMjpegWatchdog() {
 
     const timeSinceLastFrame = Date.now() - lastFrameTime.value;
     if (timeSinceLastFrame > MJPEG_STALL_TIMEOUT) {
-      console.log(`MJPEG stream stalled (${timeSinceLastFrame}ms since last frame), reconnecting...`);
-      // Try to reconnect by refreshing the stream URL
-      imgSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
-      lastFrameTime.value = Date.now(); // Reset to avoid rapid retries
+      console.log(`MJPEG stream stalled (${timeSinceLastFrame}ms), reconnecting...`);
       errorCount.value++;
 
-      // After multiple stalls, switch to polling if in auto mode
-      if (props.mode === 'auto' && errorCount.value >= 3) {
+      // Only reconnect after multiple stalls to avoid flicker from aggressive reconnection
+      if (errorCount.value >= 2) {
+        mjpegSrc.value = '';
+        setTimeout(() => {
+          mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+          lastFrameTime.value = Date.now();
+        }, 100);
+      }
+
+      if (props.mode === 'auto' && errorCount.value >= 5) {
         console.log('MJPEG keeps stalling, switching to polling mode');
         startPolling();
       }
     }
-  }, 2000); // Check every 2 seconds
+  }, 3000);  // Check less frequently
 }
 
-// Start with MJPEG, fallback to polling on errors
+// Start MJPEG mode - uses native img tag for continuous streaming
 function startMjpeg() {
   activeMode.value = 'mjpeg';
   loading.value = true;
   errorCount.value = 0;
   streamError.value = false;
+  hasFrame.value = false;
   clearConnectionTimeout();
   clearMjpegWatchdog();
-  imgSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
-  emit('modeChange', 'mjpeg');
 
-  // Start watchdog to detect stalled streams
+  // Set MJPEG source - browser handles continuous stream natively
+  mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+
+  emit('modeChange', 'mjpeg');
   startMjpegWatchdog();
 
-  // Set connection timeout - if MJPEG doesn't load within 5 seconds, switch to polling
+  // Connection timeout (longer to allow for slow inference startup)
   if (props.mode === 'auto') {
     connectionTimeout = window.setTimeout(() => {
       if (loading.value && activeMode.value === 'mjpeg') {
         console.log('MJPEG connection timeout, switching to polling mode');
         startPolling();
       }
-    }, 5000);
+    }, 10000);
   }
 }
 
-// Switch to polling mode
+// MJPEG load handler
+function onMjpegLoad() {
+  clearConnectionTimeout();
+  loading.value = false;
+  errorCount.value = 0;
+  lastFrameTime.value = Date.now();
+  hasFrame.value = true;
+}
+
+// MJPEG error handler
+function onMjpegError() {
+  errorCount.value++;
+
+  if (props.mode === 'auto' && errorCount.value >= 3) {
+    console.log('MJPEG failed, switching to polling mode');
+    startPolling();
+  } else if (props.mode !== 'polling') {
+    setTimeout(() => {
+      mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+    }, 2000);
+  }
+}
+
+// Start polling mode - uses canvas for flicker-free rendering
 function startPolling() {
   activeMode.value = 'polling';
   loading.value = true;
   streamError.value = false;
+  hasFrame.value = false;
   clearConnectionTimeout();
   clearMjpegWatchdog();
-  emit('modeChange', 'polling');
-  pollFrame();
+
+  // Clear MJPEG
+  mjpegSrc.value = '';
+
+  // Initialize canvas
+  nextTick(() => {
+    initCanvas();
+    emit('modeChange', 'polling');
+    pollFrame();
+  });
 }
 
-// Poll for new frame
+// Poll for new frame and draw to canvas
 async function pollFrame() {
   if (activeMode.value !== 'polling') return;
 
   try {
-    // Fetch frame with cache-busting timestamp
-    // Note: Don't send Cache-Control header as it triggers CORS preflight
     const response = await fetch(`${frameUrl.value}?_t=${Date.now()}`, {
       cache: 'no-store',
     });
@@ -137,43 +242,48 @@ async function pollFrame() {
       throw new Error(`HTTP ${response.status}`);
     }
 
-    // Check sequence number from header (optional optimization to skip duplicate frames)
     const seq = parseInt(response.headers.get('X-Frame-Sequence') || '0', 10);
-
-    // Always process the frame if we get valid data
-    // Only skip if sequence is same AND we already have an image displayed
-    const shouldUpdate = seq !== lastSequence.value || !imgSrc.value || imgSrc.value === '';
+    const shouldUpdate = seq !== lastSequence.value || !hasFrame.value;
 
     if (shouldUpdate || seq > lastSequence.value) {
       lastSequence.value = seq;
 
-      // Create blob URL from response
       const blob = await response.blob();
 
-      // Verify we got actual image data
       if (blob.size > 0) {
-        const oldSrc = imgSrc.value;
-        imgSrc.value = URL.createObjectURL(blob);
-
-        // Revoke old blob URL to prevent memory leak
-        if (oldSrc && oldSrc.startsWith('blob:')) {
-          URL.revokeObjectURL(oldSrc);
+        if (pendingBlobUrl) {
+          URL.revokeObjectURL(pendingBlobUrl);
         }
+
+        pendingBlobUrl = URL.createObjectURL(blob);
+
+        const img = new Image();
+        img.onload = () => {
+          drawFrame(img);
+          if (pendingBlobUrl) {
+            URL.revokeObjectURL(pendingBlobUrl);
+            pendingBlobUrl = null;
+          }
+        };
+        img.onerror = () => {
+          if (pendingBlobUrl) {
+            URL.revokeObjectURL(pendingBlobUrl);
+            pendingBlobUrl = null;
+          }
+        };
+        img.src = pendingBlobUrl;
       }
     }
 
     loading.value = false;
     errorCount.value = 0;
 
-    // Schedule next poll
     pollTimer = window.setTimeout(pollFrame, props.pollInterval);
   } catch (e) {
     errorCount.value++;
     if (errorCount.value < 10) {
-      // Retry after a longer delay
       pollTimer = window.setTimeout(pollFrame, 1000);
     } else {
-      // Max retries reached - show error state with reconnect option
       loading.value = false;
       streamError.value = true;
       emit('error', 'Failed to fetch frames');
@@ -181,49 +291,29 @@ async function pollFrame() {
   }
 }
 
-// Handle MJPEG load success
-function onMjpegLoad() {
-  clearConnectionTimeout();
-  loading.value = false;
-  errorCount.value = 0;
-  lastFrameTime.value = Date.now(); // Reset watchdog timer on each frame
-}
-
-// Handle MJPEG error - switch to polling mode
-function onMjpegError() {
-  errorCount.value++;
-
-  if (props.mode === 'auto' && errorCount.value >= 3) {
-    // Switch to polling mode
-    console.log('MJPEG failed, switching to polling mode');
-    startPolling();
-  } else if (props.mode !== 'polling') {
-    // Retry MJPEG after delay
-    setTimeout(() => {
-      imgSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
-    }, 2000);
-  }
-}
-
-// Cleanup
-function stopPolling() {
+function stopStream() {
   clearConnectionTimeout();
   clearMjpegWatchdog();
+
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
   }
-  // Clean up blob URL
-  if (imgSrc.value && imgSrc.value.startsWith('blob:')) {
-    URL.revokeObjectURL(imgSrc.value);
+
+  mjpegSrc.value = '';
+
+  if (pendingBlobUrl) {
+    URL.revokeObjectURL(pendingBlobUrl);
+    pendingBlobUrl = null;
   }
 }
 
-// Reconnect function for manual retry
 function reconnect() {
-  stopPolling();
+  stopStream();
   errorCount.value = 0;
   streamError.value = false;
+  hasFrame.value = false;
+
   if (props.mode === 'polling') {
     startPolling();
   } else {
@@ -231,10 +321,8 @@ function reconnect() {
   }
 }
 
-// Handle visibility change - auto-reconnect when tab becomes visible
 function handleVisibilityChange() {
   if (document.visibilityState === 'visible') {
-    // If we had an error or stream stopped, try to reconnect
     if (streamError.value || (loading.value && !pollTimer && !connectionTimeout)) {
       console.log('Tab visible, attempting reconnection');
       reconnect();
@@ -242,20 +330,29 @@ function handleVisibilityChange() {
   }
 }
 
-// Initialize based on mode
-onMounted(() => {
+onMounted(async () => {
+  await nextTick();
+
+  if (containerRef.value) {
+    resizeObserver = new ResizeObserver(() => {
+      if (activeMode.value === 'polling') {
+        updateCanvasSize();
+      }
+    });
+    resizeObserver.observe(containerRef.value);
+  }
+
   if (props.mode === 'polling') {
     startPolling();
   } else {
     startMjpeg();
   }
-  // Listen for visibility changes
+
   document.addEventListener('visibilitychange', handleVisibilityChange);
 });
 
-// Watch for mode prop changes
 watch(() => props.mode, (newMode) => {
-  stopPolling();
+  stopStream();
   if (newMode === 'polling') {
     startPolling();
   } else {
@@ -263,20 +360,28 @@ watch(() => props.mode, (newMode) => {
   }
 });
 
-// Cleanup on unmount
+watch([() => props.host, () => props.port], () => {
+  reconnect();
+});
+
 onUnmounted(() => {
-  stopPolling();
+  stopStream();
+
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+
   document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 
-// Expose method to force refresh
 defineExpose({
   refresh() {
     reconnect();
   },
   reconnect,
   switchMode(mode: 'mjpeg' | 'polling') {
-    stopPolling();
+    stopStream();
     if (mode === 'polling') {
       startPolling();
     } else {
@@ -287,25 +392,40 @@ defineExpose({
 </script>
 
 <template>
-  <div class="camera-stream">
+  <div class="camera-stream" ref="containerRef">
+    <!-- Loading overlay -->
     <div class="loading-overlay" v-if="loading && !streamError">
       <span class="spinner"></span>
       <span>Connecting...</span>
     </div>
+
+    <!-- Error overlay -->
     <div class="error-overlay" v-if="streamError">
       <span class="error-icon">⚠️</span>
       <span>Stream disconnected</span>
       <button class="reconnect-btn" @click="reconnect">Reconnect</button>
     </div>
+
+    <!-- MJPEG mode: Native img tag (browser handles continuous stream) -->
     <img
-      v-if="imgSrc && !streamError"
-      :src="imgSrc"
+      v-if="activeMode === 'mjpeg' && mjpegSrc && !streamError"
+      :src="mjpegSrc"
       alt="Camera feed"
       class="stream-img"
       @load="onMjpegLoad"
       @error="onMjpegError"
     />
-    <div class="mode-indicator" :class="activeMode" v-if="!streamError">
+
+    <!-- Polling mode: Canvas (flicker-free rendering) -->
+    <canvas
+      v-show="activeMode === 'polling' && !streamError"
+      ref="canvasRef"
+      class="stream-canvas"
+      :class="{ hidden: !hasFrame }"
+    ></canvas>
+
+    <!-- Mode indicator -->
+    <div class="mode-indicator" :class="activeMode" v-if="!streamError && hasFrame">
       {{ activeMode === 'mjpeg' ? 'MJPEG' : 'Polling' }}
     </div>
   </div>
@@ -324,6 +444,20 @@ defineExpose({
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.stream-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  will-change: contents;
+  transform: translateZ(0);
+}
+
+.stream-canvas.hidden {
+  visibility: hidden;
 }
 
 .loading-overlay {
@@ -363,6 +497,7 @@ defineExpose({
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.5);
   color: #94a3b8;
+  z-index: 5;
 }
 
 .mode-indicator.mjpeg {

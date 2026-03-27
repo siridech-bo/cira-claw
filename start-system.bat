@@ -1,6 +1,23 @@
 @echo off
-echo Starting CiRA Edge System...
+echo ============================================
+echo   CiRA Edge System Startup
+echo ============================================
 echo.
+
+:: Check and install dependencies if needed
+if not exist "%~dp0node_modules" (
+    echo [0/3] Installing Gateway dependencies...
+    cd /d "%~dp0"
+    call npm install
+    echo.
+)
+
+if not exist "%~dp0dashboard\node_modules" (
+    echo [0/3] Installing Dashboard dependencies...
+    cd /d "%~dp0dashboard"
+    call npm install
+    echo.
+)
 
 :: Start C++ Runtime
 echo [1/3] Starting C++ Runtime...
@@ -17,10 +34,13 @@ echo [3/3] Starting Vue Dashboard...
 start "CiRA Dashboard" "%~dp0start-dashboard.bat"
 
 echo.
-echo All services started!
+echo ============================================
+echo   All services started!
+echo ============================================
 echo.
 echo   Runtime:   http://localhost:8080
 echo   Gateway:   http://localhost:18790
 echo   Dashboard: http://localhost:3000
 echo.
-pause
+echo Press any key to close this window...
+pause > nul

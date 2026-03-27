@@ -114,15 +114,25 @@ struct cira_ctx {
     int server_running;
     int server_port;
     pthread_t camera_thread;
+    pthread_t inference_thread;     /* Separate thread for AI inference */
+    int inference_running;          /* Flag for inference thread */
     pthread_mutex_t result_mutex;
     float current_fps;
+    float inference_fps;            /* Inference throughput */
 
-    /* Frame buffer for streaming */
-    uint8_t* frame_buffer;
+    /* Double-buffered frame storage for non-blocking streaming */
+    uint8_t* frame_buffers[2];      /* Two frame buffers for double-buffering */
     int frame_w;
     int frame_h;
     int frame_size;
+    int write_buffer_idx;           /* Index of buffer being written by capture */
+    int read_buffer_idx;            /* Index of buffer ready for streaming/inference */
+    int frame_ready;                /* Flag: new frame available for inference */
     pthread_mutex_t frame_mutex;
+    pthread_cond_t frame_cond;      /* Condition variable for frame ready signal */
+
+    /* Legacy single buffer pointer (points to read buffer for compatibility) */
+    uint8_t* frame_buffer;
 
     /* Cumulative statistics (for /api/stats endpoint) */
     uint64_t total_detections;                      /* Total detections since startup */

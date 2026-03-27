@@ -1,4 +1,4 @@
 @echo off
 echo Starting CiRA Dashboard...
-cd /d "D:\CiRA Claw\cira-edge\dashboard"
+cd /d "%~dp0dashboard"
 npm run dev
