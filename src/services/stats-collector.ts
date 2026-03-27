@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { NodeConfig, AlertsConfig } from '../utils/config-schema.js';
 import { NodeManager } from '../nodes/manager.js';
 import { MqttChannel } from '../channels/mqtt.js';
+import { WebSocketHandler } from '../gateway/websocket.js';
 import { createLogger } from '../utils/logger.js';
 import { RuleEngine, RulePayload, RuleAction, RuleResult, SocketType } from './rule-engine.js';
 import { CompositeRuleEngine, CompositeRuleResult } from './composite-rule-engine.js';
@@ -10,6 +11,21 @@ import fs from 'fs';
 import path from 'path';
 
 const logger = createLogger('stats-collector');
+
+// Rule execution record for history tracking
+export interface RuleExecution {
+  timestamp: string;
+  ruleId: string;
+  ruleName: string;
+  action: string;
+  success: boolean;
+  execution_ms: number;
+  payload_preview: string;
+  error?: string;
+}
+
+// Maximum executions to keep per rule
+const MAX_HISTORY_PER_RULE = 100;
 
 export interface NodeStats {
   nodeId: string;
@@ -59,6 +75,12 @@ export class StatsCollector extends EventEmitter {
   private actionRunner: ActionRunner | null = null;
   private lastCompositeResults: Map<string, CompositeRuleResult> | null = null;
 
+  // WebSocket handler for real-time rule execution streaming
+  private wsHandler: WebSocketHandler | null = null;
+
+  // Rule execution history (circular buffer per rule)
+  private ruleExecutionHistory: Map<string, RuleExecution[]> = new Map();
+
   constructor(
     nodeManager: NodeManager,
     mqttChannel: MqttChannel | null,
@@ -75,6 +97,13 @@ export class StatsCollector extends EventEmitter {
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
+  }
+
+  /**
+   * Set the WebSocket handler for real-time rule execution broadcasting.
+   */
+  setWebSocketHandler(handler: WebSocketHandler): void {
+    this.wsHandler = handler;
   }
 
   // Start collecting stats
@@ -205,8 +234,34 @@ export class StatsCollector extends EventEmitter {
           this.lastRuleResults = results;
           this.lastRuleResultsAt = new Date().toISOString();
 
-          // Dispatch non-pass actions for atomic rules
+          // Create payload preview for WebSocket streaming
+          const payloadPreview = this.getPayloadPreview(payload);
+
+          // Broadcast and store execution results for all rules
           for (const [ruleId, result] of results) {
+            // Get rule name from engine
+            const rule = this.ruleEngine.getRule(ruleId);
+            const ruleName = rule?.name || ruleId;
+
+            // Create execution record
+            const execution: RuleExecution = {
+              timestamp: new Date().toISOString(),
+              ruleId,
+              ruleName,
+              action: result.action?.action || 'pass',
+              success: result.success,
+              execution_ms: result.execution_ms,
+              payload_preview: payloadPreview,
+              error: result.error,
+            };
+
+            // Store in history (circular buffer)
+            this.addExecutionToHistory(ruleId, execution);
+
+            // Broadcast via WebSocket
+            this.broadcastRuleExecution(execution);
+
+            // Dispatch non-pass actions
             if (result.success && result.action && result.action.action !== 'pass') {
               this.handleRuleAction(node.id, ruleId, result.action, false);
             }
@@ -490,21 +545,39 @@ export class StatsCollector extends EventEmitter {
             detections?: Array<{
               label?: string;
               confidence?: number;
+              // C++ runtime uses bbox array format
+              bbox?: [number, number, number, number];
+              // Alternative individual fields
               x?: number;
               y?: number;
               w?: number;
               h?: number;
             }>;
             frame_number?: number;
+            count?: number;
           };
-          detections = (data.detections || []).map((d) => ({
-            label: d.label || 'unknown',
-            confidence: d.confidence || 0,
-            x: d.x || 0,
-            y: d.y || 0,
-            w: d.w || 0,
-            h: d.h || 0,
-          }));
+          detections = (data.detections || []).map((d) => {
+            // Handle both bbox array format (from C++ runtime) and individual fields
+            if (d.bbox && Array.isArray(d.bbox) && d.bbox.length >= 4) {
+              return {
+                label: d.label || 'unknown',
+                confidence: d.confidence || 0,
+                x: d.bbox[0],
+                y: d.bbox[1],
+                w: d.bbox[2],
+                h: d.bbox[3],
+              };
+            }
+            // Fallback to individual fields
+            return {
+              label: d.label || 'unknown',
+              confidence: d.confidence || 0,
+              x: d.x || 0,
+              y: d.y || 0,
+              w: d.w || 0,
+              h: d.h || 0,
+            };
+          });
           frameInfo.number = data.frame_number || 0;
         }
       }
@@ -706,6 +779,82 @@ export class StatsCollector extends EventEmitter {
         // No action needed
         break;
     }
+  }
+
+  /**
+   * Create a compact preview of the payload for display in execution monitor.
+   */
+  private getPayloadPreview(payload: RulePayload): string {
+    const parts: string[] = [];
+
+    // Detection count
+    if (payload.detections && payload.detections.length > 0) {
+      const labels = payload.detections.map(d => d.label);
+      const uniqueLabels = [...new Set(labels)];
+      parts.push(`det: ${payload.detections.length} [${uniqueLabels.slice(0, 3).join(', ')}${uniqueLabels.length > 3 ? '...' : ''}]`);
+    }
+
+    // FPS
+    if (payload.stats?.fps) {
+      parts.push(`fps: ${payload.stats.fps.toFixed(1)}`);
+    }
+
+    // Signal prediction
+    if (payload.signal_prediction) {
+      parts.push(`signal: ${payload.signal_prediction.label}`);
+    }
+
+    return parts.join(', ') || 'empty';
+  }
+
+  /**
+   * Add execution to history (circular buffer).
+   */
+  private addExecutionToHistory(ruleId: string, execution: RuleExecution): void {
+    let history = this.ruleExecutionHistory.get(ruleId);
+    if (!history) {
+      history = [];
+      this.ruleExecutionHistory.set(ruleId, history);
+    }
+
+    // Add to front (newest first)
+    history.unshift(execution);
+
+    // Trim to max size
+    if (history.length > MAX_HISTORY_PER_RULE) {
+      history.pop();
+    }
+  }
+
+  /**
+   * Broadcast rule execution event via WebSocket.
+   */
+  private broadcastRuleExecution(execution: RuleExecution): void {
+    if (!this.wsHandler) return;
+
+    this.wsHandler.broadcast('rule-executions', {
+      type: 'rule:execution',
+      payload: execution,
+    });
+  }
+
+  /**
+   * Get execution history for a specific rule.
+   * Used by GET /api/rules/:id/executions endpoint.
+   */
+  getRuleExecutions(ruleId: string): { executions: RuleExecution[]; total: number } {
+    const history = this.ruleExecutionHistory.get(ruleId) || [];
+    return {
+      executions: history,
+      total: history.length,
+    };
+  }
+
+  /**
+   * Get all execution history (for debugging/export).
+   */
+  getAllExecutions(): Map<string, RuleExecution[]> {
+    return this.ruleExecutionHistory;
   }
 }
 

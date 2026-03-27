@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
+import RuleExecutionMonitor from '../components/RuleExecutionMonitor.vue';
+import RuleExecutionHistory from '../components/RuleExecutionHistory.vue';
 
 interface SavedRule {
   id: string;
@@ -71,8 +73,25 @@ const aiResponse = ref<string | null>(null);
 const aiError = ref<string | null>(null);
 const aiMessagesContainer = ref<HTMLElement | null>(null);
 
+// Tab state for code/executions view
+const activeTab = ref<'code' | 'executions' | 'history'>('code');
+
+// Code editor state
+const editedCode = ref('');
+const codeSaving = ref(false);
+const codeError = ref<string | null>(null);
+const codeSuccess = ref(false);
+
 let ws: WebSocket | null = null;
 let reconnectTimer: number | null = null;
+
+// Reset tab and code editor when rule changes
+watch(selectedRule, (newRule) => {
+  activeTab.value = 'code';
+  editedCode.value = newRule?.code || '';
+  codeError.value = null;
+  codeSuccess.value = false;
+});
 
 // =====================
 // Parameter Extraction
@@ -234,7 +253,8 @@ async function saveQuickEdit() {
     selectedRule.value.code = newCode;
     selectedRule.value.created_by = 'manual';
 
-    // Refresh params
+    // Re-extract parameters from the updated code to refresh displayed values
+    extractedParams.value = extractParameters(newCode);
     initEditedParams();
 
     quickEditSuccess.value = true;
@@ -261,6 +281,60 @@ const hasQuickEditChanges = computed(() => {
   }
   return false;
 });
+
+// Check if code has been modified
+const hasCodeChanges = computed(() => {
+  if (!selectedRule.value) return false;
+  return editedCode.value !== selectedRule.value.code;
+});
+
+// Save code changes
+async function saveCodeChanges() {
+  if (!selectedRule.value || codeSaving.value || !hasCodeChanges.value) return;
+
+  codeSaving.value = true;
+  codeError.value = null;
+  codeSuccess.value = false;
+
+  try {
+    const response = await fetch(`/api/rules/${selectedRule.value.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: editedCode.value }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || data.error || `HTTP ${response.status}`);
+    }
+
+    // Update local state
+    selectedRule.value.code = editedCode.value;
+    selectedRule.value.created_by = 'manual';
+
+    // Re-extract parameters from updated code
+    extractedParams.value = extractParameters(editedCode.value);
+    initEditedParams();
+
+    codeSuccess.value = true;
+    setTimeout(() => { codeSuccess.value = false; }, 3000);
+
+  } catch (err) {
+    codeError.value = err instanceof Error ? err.message : 'Failed to save code';
+  } finally {
+    codeSaving.value = false;
+  }
+}
+
+// Reset code to original
+function resetCodeChanges() {
+  if (selectedRule.value) {
+    editedCode.value = selectedRule.value.code;
+    codeError.value = null;
+    codeSuccess.value = false;
+  }
+}
 
 // =====================
 // WebSocket for AI Chat
@@ -478,8 +552,11 @@ async function deleteRule(rule: SavedRule) {
 
 function selectRule(rule: SavedRule) {
   selectedRule.value = rule;
+  editedCode.value = rule.code;
   aiResponse.value = null;
   aiError.value = null;
+  codeError.value = null;
+  codeSuccess.value = false;
   initEditedParams();
 }
 
@@ -737,11 +814,61 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Code Viewer -->
+          <!-- Code & Executions Tabbed View -->
           <div class="detail-section">
-            <h4>JavaScript Code</h4>
-            <div class="code-viewer">
-              <pre><code>{{ selectedRule.code }}</code></pre>
+            <div class="detail-tabs">
+              <button
+                class="tab-btn"
+                :class="{ active: activeTab === 'code' }"
+                @click="activeTab = 'code'"
+              >Code</button>
+              <button
+                class="tab-btn"
+                :class="{ active: activeTab === 'executions' }"
+                @click="activeTab = 'executions'"
+              >Executions</button>
+              <button
+                class="tab-btn"
+                :class="{ active: activeTab === 'history' }"
+                @click="activeTab = 'history'"
+              >History</button>
+            </div>
+
+            <div class="tab-content">
+              <!-- Code Tab -->
+              <div v-if="activeTab === 'code'" class="code-editor">
+                <div class="code-editor-header" v-if="hasCodeChanges || codeError || codeSuccess">
+                  <div class="code-status">
+                    <span v-if="codeError" class="code-error">{{ codeError }}</span>
+                    <span v-else-if="codeSuccess" class="code-success">Saved!</span>
+                    <span v-else-if="hasCodeChanges" class="code-modified">Modified</span>
+                  </div>
+                  <div class="code-actions" v-if="hasCodeChanges">
+                    <button class="code-reset-btn" @click="resetCodeChanges" :disabled="codeSaving">Reset</button>
+                    <button class="code-save-btn" @click="saveCodeChanges" :disabled="codeSaving">
+                      {{ codeSaving ? 'Saving...' : 'Save' }}
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  class="code-textarea"
+                  v-model="editedCode"
+                  spellcheck="false"
+                  :class="{ modified: hasCodeChanges }"
+                ></textarea>
+              </div>
+
+              <!-- Live Executions Tab -->
+              <RuleExecutionMonitor
+                v-else-if="activeTab === 'executions'"
+                :rule-id="selectedRule.id"
+              />
+
+              <!-- History Tab -->
+              <RuleExecutionHistory
+                v-else
+                :rule-id="selectedRule.id"
+              />
             </div>
           </div>
 
@@ -1279,24 +1406,138 @@ onUnmounted(() => {
   border-top: 1px solid #1E293B;
 }
 
-.code-viewer {
+/* Tab System */
+.detail-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 8px;
+}
+
+.tab-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #e2e8f0;
+}
+
+.tab-btn.active {
+  background: #3B82F6;
+  color: white;
+}
+
+.tab-content {
+  min-height: 200px;
+}
+
+/* Code Editor */
+.code-editor {
   background: #0F172A;
   border-radius: 8px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.code-viewer pre {
-  margin: 0;
+.code-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #1E293B;
+  border-bottom: 1px solid #334155;
+}
+
+.code-status {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.code-modified {
+  color: #22D3EE;
+}
+
+.code-error {
+  color: #f87171;
+}
+
+.code-success {
+  color: #4ade80;
+}
+
+.code-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.code-reset-btn,
+.code-save-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.code-reset-btn {
+  background: #334155;
+  color: #94a3b8;
+}
+
+.code-reset-btn:hover:not(:disabled) {
+  background: #475569;
+  color: #e2e8f0;
+}
+
+.code-save-btn {
+  background: #166534;
+  color: white;
+}
+
+.code-save-btn:hover:not(:disabled) {
+  background: #15803d;
+}
+
+.code-reset-btn:disabled,
+.code-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.code-textarea {
+  width: 100%;
+  min-height: 250px;
   padding: 16px;
-  overflow-x: auto;
+  margin: 0;
+  border: none;
+  background: #0F172A;
+  color: #E2E8F0;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 13px;
   line-height: 1.6;
+  resize: vertical;
+  outline: none;
 }
 
-.code-viewer code {
-  color: #E2E8F0;
-  white-space: pre;
+.code-textarea:focus {
+  background: #0c1322;
+}
+
+.code-textarea.modified {
+  border-left: 3px solid #22D3EE;
 }
 
 /* AI Section */

@@ -75,7 +75,21 @@ function formatUptime(seconds: number | null | undefined): string {
   const hours = Math.floor((seconds % 86400) / 3600);
   if (days > 0) return `${days}d ${hours}h`;
   const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours === 0 && minutes === 0) return `${Math.floor(seconds)}s`;
   return `${hours}h ${minutes}m`;
+}
+
+function truncateModel(name: string): string {
+  // Remove common prefixes/extensions
+  let clean = name
+    .replace(/\.ncnn\.bin$|\.onnx$|\.weights$|\.pt$|\.trt$/i, '')
+    .replace(/^yolov\d+[a-z]?[-_]?/i, 'Y')  // YOLOv8n -> Yn
+    .replace(/[-_]/g, ' ');
+  // Truncate if still too long
+  if (clean.length > 12) {
+    return clean.substring(0, 10) + '..';
+  }
+  return clean;
 }
 </script>
 
@@ -100,15 +114,15 @@ function formatUptime(seconds: number | null | undefined): string {
           <span class="metric-label">FPS</span>
           <span class="metric-value">{{ node.metrics.fps ?? '--' }}</span>
         </div>
-        <div class="metric">
-          <span class="metric-label">Temp</span>
-          <span class="metric-value" :class="{ warning: (node.metrics.temperature ?? 0) > 75 }">
-            {{ node.metrics.temperature ? `${node.metrics.temperature}°C` : '--' }}
+        <div class="metric model-metric">
+          <span class="metric-label">Model</span>
+          <span class="metric-value model-name" :title="node.inference?.modelName || 'No model'">
+            {{ node.inference?.modelName ? truncateModel(node.inference.modelName) : '--' }}
           </span>
         </div>
         <div class="metric">
-          <span class="metric-label">Defects/hr</span>
-          <span class="metric-value">{{ node.inference?.defectsPerHour ?? '--' }}</span>
+          <span class="metric-label">Uptime</span>
+          <span class="metric-value">{{ formatUptime(node.metrics.uptime) }}</span>
         </div>
       </div>
 
@@ -126,18 +140,13 @@ function formatUptime(seconds: number | null | undefined): string {
 
     <div class="card-footer">
       <span class="host">{{ node.host }}</span>
-      <div class="footer-right">
-        <span
-          v-if="node.signalSlot"
-          class="signal-badge"
-          :class="node.signalSlot.loaded ? 'loaded' : 'empty'"
-        >
-          Signal: {{ node.signalSlot.loaded ? 'OK' : '--' }}
-        </span>
-        <span class="uptime" v-if="node.metrics?.uptime">
-          {{ formatUptime(node.metrics.uptime) }}
-        </span>
-      </div>
+      <span
+        v-if="node.signalSlot"
+        class="signal-badge"
+        :class="node.signalSlot.loaded ? 'loaded' : 'empty'"
+      >
+        SIGNAL: {{ node.signalSlot.loaded ? node.signalSlot.name || 'OK' : '--' }}
+      </span>
     </div>
   </router-link>
 </template>
@@ -231,6 +240,19 @@ function formatUptime(seconds: number | null | undefined): string {
   color: #ea580c;
 }
 
+.model-metric {
+  min-width: 0;
+}
+
+.model-name {
+  font-size: 0.9rem;
+  color: #22D3EE;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .offline-message,
 .unknown-message {
   text-align: center;
@@ -255,12 +277,6 @@ function formatUptime(seconds: number | null | undefined): string {
 
 .host {
   font-family: monospace;
-}
-
-.footer-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 .signal-badge {

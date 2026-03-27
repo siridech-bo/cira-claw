@@ -162,6 +162,8 @@ static void* inference_thread_func(void* arg) {
                     }
 
                     if (result == CIRA_OK) {
+                        /* Update result JSON for /api/results endpoint */
+                        cira_update_results(ctx, w, h);
                         ctx->total_frames++;
                         inference_count++;
                     } else if (result != CIRA_ERROR) {

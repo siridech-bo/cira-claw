@@ -358,6 +358,14 @@ export class RuleEngine {
   }
 
   /**
+   * Get a single rule by ID.
+   * Returns undefined if not found.
+   */
+  getRule(ruleId: string): SavedRule | undefined {
+    return this.loadRules().find(r => r.id === ruleId);
+  }
+
+  /**
    * Save a rule to disk with JSON header format.
    *
    * v3 validation:

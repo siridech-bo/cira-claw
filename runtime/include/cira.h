@@ -185,6 +185,17 @@ int cira_signal_stats(cira_ctx* ctx, int channel_idx,
 const char* cira_result_json(cira_ctx* ctx);
 
 /**
+ * Update result JSON from current detections.
+ * Call this after direct predict calls (ncnn_predict, etc.) to update
+ * the result JSON returned by cira_result_json().
+ *
+ * @param ctx Context handle
+ * @param img_w Image width (for coordinate conversion)
+ * @param img_h Image height (for coordinate conversion)
+ */
+void cira_update_results(cira_ctx* ctx, int img_w, int img_h);
+
+/**
  * Get number of detections in last result.
  *
  * @param ctx Context handle

@@ -329,6 +329,7 @@ async function main(): Promise<void> {
       statsCollector.setRuleEngine(ruleEngine);
       statsCollector.setCompositeRuleEngine(compositeRuleEngine);
       statsCollector.setActionRunner(actionRunner);
+      statsCollector.setWebSocketHandler(wsHandler);  // Enable real-time rule execution streaming
     }
 
     // Register WebChat routes for agent chat (after statsCollector for real data)

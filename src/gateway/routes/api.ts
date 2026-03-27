@@ -956,6 +956,21 @@ export async function registerApiRoutes(
     }
   );
 
+  // Get rule execution history (for execution monitor)
+  fastify.get<{ Params: { id: string } }>(
+    '/api/rules/:id/executions',
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (!_statsCollector) {
+        return reply.status(503).send({
+          error: 'Stats collector not available',
+        });
+      }
+
+      const { id } = request.params;
+      return _statsCollector.getRuleExecutions(id);
+    }
+  );
+
   // Toggle rule enabled/disabled
   fastify.post<{ Params: { id: string }; Body: { enabled: boolean } }>(
     '/api/rules/:id/toggle',

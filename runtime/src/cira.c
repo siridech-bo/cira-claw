@@ -1163,6 +1163,13 @@ const char* cira_result_json(cira_ctx* ctx) {
     return ctx->result_json;
 }
 
+void cira_update_results(cira_ctx* ctx, int img_w, int img_h) {
+    if (!ctx || img_w <= 0 || img_h <= 0) return;
+    pthread_mutex_lock(&ctx->result_mutex);
+    build_result_json(ctx, img_w, img_h);
+    pthread_mutex_unlock(&ctx->result_mutex);
+}
+
 int cira_result_count(cira_ctx* ctx) {
     if (!ctx) return 0;
     return ctx->num_detections;

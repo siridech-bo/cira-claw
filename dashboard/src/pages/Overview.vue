@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import NodeCard from '../components/NodeCard.vue';
+import RuleExecutionSummary from '../components/RuleExecutionSummary.vue';
 
 interface NodeMetrics {
   fps: number | null;
@@ -94,6 +95,9 @@ async function fetchNodes() {
         <div class="summary-label">Error</div>
       </div>
     </div>
+
+    <!-- Real-time Rule Execution Summary -->
+    <RuleExecutionSummary />
 
     <div class="error-message" v-if="error">
       <p>Failed to load devices: {{ error }}</p>

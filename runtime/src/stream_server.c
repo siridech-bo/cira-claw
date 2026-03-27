@@ -314,18 +314,6 @@ static void get_timestamp(char* buf, size_t size) {
     strftime(buf, size, "%Y-%m-%dT%H:%M:%S", tm);
 }
 
-/* Helper: Get system uptime in seconds */
-static long get_uptime(void) {
-    FILE* f = fopen("/proc/uptime", "r");
-    if (!f) return 0;
-
-    double uptime;
-    if (fscanf(f, "%lf", &uptime) != 1) uptime = 0;
-    fclose(f);
-
-    return (long)uptime;
-}
-
 /* Helper: Get CPU temperature (Linux/Jetson) */
 static float get_temperature(void) {
     FILE* f = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
@@ -404,8 +392,11 @@ static int handle_health(struct MHD_Connection* conn, cira_ctx* ctx) {
     char timestamp[32];
     get_timestamp(timestamp, sizeof(timestamp));
 
+    /* Calculate runtime uptime (works on Windows and Linux) */
+    time_t now = time(NULL);
+    long uptime = ctx ? (long)(now - ctx->start_time) : 0;
+
     /* Calculate defects per hour */
-    long uptime = get_uptime();
     float defects_per_hour = 0;
     if (uptime > 0) {
         defects_per_hour = (float)ctx->total_detections * 3600.0f / uptime;

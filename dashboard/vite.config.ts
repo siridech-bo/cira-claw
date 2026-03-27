@@ -39,9 +39,16 @@ export default defineConfig({
       '/snapshot': 'http://localhost:8080',
       '/stream': 'http://localhost:8080',
       '/frame': 'http://localhost:8080',
+      // C++ runtime WebSocket (for direct runtime connections if needed)
       '/ws': {
         target: 'ws://localhost:8080',
         ws: true,
+      },
+      // Gateway WebSocket for rule executions and node updates
+      '/gateway-ws': {
+        target: 'ws://localhost:18790',
+        ws: true,
+        rewrite: (path) => path.replace(/^\/gateway-ws/, '/ws'),
       },
     },
   },
