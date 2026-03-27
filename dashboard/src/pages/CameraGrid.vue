@@ -31,9 +31,9 @@ let pageRefreshTimer: number | null = null;
 const pageStartTime = Date.now();
 const showRefreshWarning = ref(false);
 
-// Auto page refresh after 30 minutes to prevent memory buildup
-const PAGE_AUTO_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
-const PAGE_WARNING_BEFORE_MS = 60 * 1000; // Warning 1 minute before
+// Auto page refresh after 15 minutes to prevent memory buildup
+const PAGE_AUTO_REFRESH_MS = 15 * 60 * 1000; // 15 minutes (more aggressive for factory use)
+const PAGE_WARNING_BEFORE_MS = 30 * 1000; // Warning 30 seconds before
 
 const onlineNodes = computed(() =>
   nodes.value.filter(n => n.status === 'online')
