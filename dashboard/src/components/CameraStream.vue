@@ -52,7 +52,7 @@ const MJPEG_STALL_TIMEOUT = 5000;
 // Blank frame threshold - if img has no content for this many checks, reconnect
 const BLANK_FRAME_THRESHOLD = 3;
 // MJPEG memory cleanup - reconnect every N minutes to clear browser's accumulated buffer
-const MJPEG_MEMORY_CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const MJPEG_MEMORY_CLEANUP_INTERVAL = 3 * 60 * 1000; // 3 minutes (aggressive)
 
 const baseUrl = computed(() => `http://${props.host}:${props.port}`);
 

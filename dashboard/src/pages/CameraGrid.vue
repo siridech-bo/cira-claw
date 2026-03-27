@@ -27,6 +27,13 @@ const streamMode = ref<'auto' | 'mjpeg' | 'polling'>('auto');
 const streamRefs = ref<Record<string, InstanceType<typeof CameraStream> | null>>({});
 
 let refreshInterval: number | null = null;
+let pageRefreshTimer: number | null = null;
+const pageStartTime = Date.now();
+const showRefreshWarning = ref(false);
+
+// Auto page refresh after 30 minutes to prevent memory buildup
+const PAGE_AUTO_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
+const PAGE_WARNING_BEFORE_MS = 60 * 1000; // Warning 1 minute before
 
 const onlineNodes = computed(() =>
   nodes.value.filter(n => n.status === 'online')
@@ -36,13 +43,49 @@ onMounted(async () => {
   await fetchNodes();
   // Refresh node status every 10 seconds
   refreshInterval = window.setInterval(fetchNodes, 10000);
+
+  // Setup auto page refresh to prevent memory buildup from long-running streams
+  pageRefreshTimer = window.setTimeout(() => {
+    showRefreshWarning.value = true;
+    // Auto refresh after warning period
+    setTimeout(() => {
+      if (showRefreshWarning.value) {
+        window.location.reload();
+      }
+    }, PAGE_WARNING_BEFORE_MS);
+  }, PAGE_AUTO_REFRESH_MS - PAGE_WARNING_BEFORE_MS);
 });
 
 onUnmounted(() => {
   if (refreshInterval) {
     clearInterval(refreshInterval);
   }
+  if (pageRefreshTimer) {
+    clearTimeout(pageRefreshTimer);
+  }
 });
+
+// Dismiss refresh warning and postpone by 15 minutes
+function dismissRefreshWarning() {
+  showRefreshWarning.value = false;
+  // Postpone auto-refresh by 15 minutes
+  if (pageRefreshTimer) {
+    clearTimeout(pageRefreshTimer);
+  }
+  pageRefreshTimer = window.setTimeout(() => {
+    showRefreshWarning.value = true;
+    setTimeout(() => {
+      if (showRefreshWarning.value) {
+        window.location.reload();
+      }
+    }, PAGE_WARNING_BEFORE_MS);
+  }, 15 * 60 * 1000); // 15 minutes postpone
+}
+
+// Manual refresh now
+function refreshPageNow() {
+  window.location.reload();
+}
 
 async function fetchNodes() {
   try {
@@ -76,6 +119,15 @@ function handleStreamError(nodeId: string, msg: string) {
 
 <template>
   <div class="camera-grid-page">
+    <!-- Memory refresh warning -->
+    <div class="refresh-warning" v-if="showRefreshWarning">
+      <span>Page will auto-refresh to prevent memory issues</span>
+      <div class="refresh-actions">
+        <button class="postpone-btn" @click="dismissRefreshWarning">Postpone 15min</button>
+        <button class="refresh-now-btn" @click="refreshPageNow">Refresh Now</button>
+      </div>
+    </div>
+
     <header class="page-header">
       <h2>All Cameras</h2>
       <div class="header-controls">
@@ -148,6 +200,54 @@ function handleStreamError(nodeId: string, msg: string) {
 .camera-grid-page {
   max-width: 1600px;
   margin: 0 auto;
+}
+
+.refresh-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: rgba(251, 146, 60, 0.15);
+  border: 1px solid #FB923C;
+  border-radius: 8px;
+  color: #FB923C;
+  font-size: 0.875rem;
+}
+
+.refresh-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.postpone-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid #FB923C;
+  border-radius: 6px;
+  color: #FB923C;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.postpone-btn:hover {
+  background: rgba(251, 146, 60, 0.2);
+}
+
+.refresh-now-btn {
+  padding: 6px 12px;
+  background: #FB923C;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.refresh-now-btn:hover {
+  background: #F97316;
 }
 
 .page-header {
