@@ -46,6 +46,8 @@ let pendingBlobUrl: string | null = null;
 
 // Reusable Image object for polling mode (prevents memory leak from creating new Images)
 let reusableImage: HTMLImageElement | null = null;
+let frameCount = 0;
+const RESET_IMAGE_EVERY_N_FRAMES = 500; // Reset image object every 500 frames to prevent corruption
 
 // Stall timeout - if no valid frames for this long, reconnect
 const MJPEG_STALL_TIMEOUT = 5000;
@@ -105,6 +107,7 @@ function drawFrame(img: HTMLImageElement) {
   const rect = containerRef.value.getBoundingClientRect();
   const canvasWidth = rect.width;
   const canvasHeight = rect.height;
+  const dpr = window.devicePixelRatio || 1;
 
   const imgAspect = img.naturalWidth / img.naturalHeight;
   const canvasAspect = canvasWidth / canvasHeight;
@@ -123,11 +126,18 @@ function drawFrame(img: HTMLImageElement) {
     drawY = 0;
   }
 
-  // Clear and draw with proper compositing
-  ctx.globalCompositeOperation = 'copy';
+  // Reset context state before drawing to prevent accumulated corruption
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // Apply DPR scaling
+  ctx.imageSmoothingEnabled = false;
+
+  // Clear background
   ctx.fillStyle = '#0F172A';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-  ctx.globalCompositeOperation = 'source-over';
+
+  // Draw image
   ctx.drawImage(img, Math.floor(drawX), Math.floor(drawY), Math.ceil(drawWidth), Math.ceil(drawHeight));
 
   hasFrame.value = true;
@@ -317,9 +327,17 @@ async function pollFrame() {
 
         pendingBlobUrl = URL.createObjectURL(blob);
 
-        // Reuse Image object to prevent memory leak from creating new Images every frame
-        if (!reusableImage) {
+        // Periodically reset Image object to prevent color corruption over time
+        frameCount++;
+        if (!reusableImage || frameCount >= RESET_IMAGE_EVERY_N_FRAMES) {
+          // Clean up old image
+          if (reusableImage) {
+            reusableImage.onload = null;
+            reusableImage.onerror = null;
+            reusableImage.src = '';
+          }
           reusableImage = new Image();
+          frameCount = 0;
         }
 
         reusableImage.onload = () => {
