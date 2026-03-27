@@ -40,13 +40,19 @@ const blankFrameCount = ref(0);
 let pollTimer: number | null = null;
 let connectionTimeout: number | null = null;
 let mjpegWatchdog: number | null = null;
+let mjpegMemoryTimer: number | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let pendingBlobUrl: string | null = null;
+
+// Reusable Image object for polling mode (prevents memory leak from creating new Images)
+let reusableImage: HTMLImageElement | null = null;
 
 // Stall timeout - if no valid frames for this long, reconnect
 const MJPEG_STALL_TIMEOUT = 5000;
 // Blank frame threshold - if img has no content for this many checks, reconnect
 const BLANK_FRAME_THRESHOLD = 3;
+// MJPEG memory cleanup - reconnect every N minutes to clear browser's accumulated buffer
+const MJPEG_MEMORY_CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes
 
 const baseUrl = computed(() => `http://${props.host}:${props.port}`);
 
@@ -133,6 +139,28 @@ function clearMjpegWatchdog() {
   }
 }
 
+function clearMjpegMemoryTimer() {
+  if (mjpegMemoryTimer) {
+    clearInterval(mjpegMemoryTimer);
+    mjpegMemoryTimer = null;
+  }
+}
+
+// Periodic MJPEG reconnect to clear browser's accumulated memory buffer
+function startMjpegMemoryCleanup() {
+  clearMjpegMemoryTimer();
+  mjpegMemoryTimer = window.setInterval(() => {
+    if (activeMode.value !== 'mjpeg') return;
+    console.log('MJPEG memory cleanup - reconnecting to clear buffer');
+    // Clear and reconnect to release accumulated memory
+    mjpegSrc.value = '';
+    setTimeout(() => {
+      mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+      lastFrameTime.value = Date.now();
+    }, 100);
+  }, MJPEG_MEMORY_CLEANUP_INTERVAL);
+}
+
 // MJPEG watchdog - detect blank/stalled streams by checking actual image content
 function startMjpegWatchdog() {
   clearMjpegWatchdog();
@@ -190,12 +218,14 @@ function startMjpeg() {
   hasFrame.value = false;
   clearConnectionTimeout();
   clearMjpegWatchdog();
+  clearMjpegMemoryTimer();
 
   // Set MJPEG source - browser handles continuous stream natively
   mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
 
   emit('modeChange', 'mjpeg');
   startMjpegWatchdog();
+  startMjpegMemoryCleanup(); // Periodic reconnect to prevent memory buildup
 
   // Connection timeout (longer to allow for slow inference startup)
   if (props.mode === 'auto') {
@@ -279,21 +309,27 @@ async function pollFrame() {
 
         pendingBlobUrl = URL.createObjectURL(blob);
 
-        const img = new Image();
-        img.onload = () => {
-          drawFrame(img);
+        // Reuse Image object to prevent memory leak from creating new Images every frame
+        if (!reusableImage) {
+          reusableImage = new Image();
+        }
+
+        reusableImage.onload = () => {
+          if (reusableImage) {
+            drawFrame(reusableImage);
+          }
           if (pendingBlobUrl) {
             URL.revokeObjectURL(pendingBlobUrl);
             pendingBlobUrl = null;
           }
         };
-        img.onerror = () => {
+        reusableImage.onerror = () => {
           if (pendingBlobUrl) {
             URL.revokeObjectURL(pendingBlobUrl);
             pendingBlobUrl = null;
           }
         };
-        img.src = pendingBlobUrl;
+        reusableImage.src = pendingBlobUrl;
       }
     }
 
@@ -316,6 +352,7 @@ async function pollFrame() {
 function stopStream() {
   clearConnectionTimeout();
   clearMjpegWatchdog();
+  clearMjpegMemoryTimer();
 
   if (pollTimer) {
     clearTimeout(pollTimer);
@@ -327,6 +364,14 @@ function stopStream() {
   if (pendingBlobUrl) {
     URL.revokeObjectURL(pendingBlobUrl);
     pendingBlobUrl = null;
+  }
+
+  // Clean up reusable image
+  if (reusableImage) {
+    reusableImage.onload = null;
+    reusableImage.onerror = null;
+    reusableImage.src = '';
+    reusableImage = null;
   }
 }
 
