@@ -71,10 +71,11 @@ function initCanvas() {
   ctx = canvasRef.value.getContext('2d', {
     alpha: false,
     desynchronized: true,
+    willReadFrequently: false,
   });
   if (ctx) {
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'medium';
+    // Disable smoothing for sharper image rendering
+    ctx.imageSmoothingEnabled = false;
   }
   updateCanvasSize();
 }
@@ -85,17 +86,21 @@ function updateCanvasSize() {
   const rect = containerRef.value.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
 
-  canvasRef.value.width = rect.width * dpr;
-  canvasRef.value.height = rect.height * dpr;
+  // Set canvas resolution to match display size * DPR
+  canvasRef.value.width = Math.floor(rect.width * dpr);
+  canvasRef.value.height = Math.floor(rect.height * dpr);
 
+  // Reset context state after resize (canvas resize clears context)
   if (ctx) {
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
   }
 }
 
 // Draw frame to canvas (for polling mode)
 function drawFrame(img: HTMLImageElement) {
   if (!ctx || !canvasRef.value || !containerRef.value) return;
+  if (!img.naturalWidth || !img.naturalHeight) return; // Skip invalid images
 
   const rect = containerRef.value.getBoundingClientRect();
   const canvasWidth = rect.width;
@@ -118,9 +123,12 @@ function drawFrame(img: HTMLImageElement) {
     drawY = 0;
   }
 
+  // Clear and draw with proper compositing
+  ctx.globalCompositeOperation = 'copy';
   ctx.fillStyle = '#0F172A';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-  ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(img, Math.floor(drawX), Math.floor(drawY), Math.ceil(drawWidth), Math.ceil(drawHeight));
 
   hasFrame.value = true;
 }
