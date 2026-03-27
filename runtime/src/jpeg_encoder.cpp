@@ -11,12 +11,32 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
 #ifdef CIRA_STREAMING_ENABLED
 #ifdef CIRA_OPENCV_ENABLED
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+
+/* Get current time in milliseconds */
+static uint64_t get_time_ms(void) {
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+#endif
+}
+
+/* Detection persistence timeout in milliseconds */
+#define DETECTION_PERSIST_MS 500
 
 /* Static buffer for encoded JPEG */
 static std::vector<uchar> g_jpeg_buffer;
@@ -95,12 +115,13 @@ int jpeg_encode_annotated(cira_ctx* ctx, const uint8_t* rgb_data, int width, int
     cv::Mat bgr;
     cv::cvtColor(rgb, bgr, cv::COLOR_RGB2BGR);
 
-    /* Draw detections with persistence (reduce flickering) */
+    /* Draw detections with time-based persistence (reduce flickering) */
     pthread_mutex_lock(&ctx->result_mutex);
 
     /* Use current detections, or fall back to previous if current is empty */
     cira_detection_t* dets = ctx->detections;
     int num_dets = ctx->num_detections;
+    uint64_t now = get_time_ms();
 
     if (num_dets > 0) {
         /* Save current detections for persistence */
@@ -108,9 +129,10 @@ int jpeg_encode_annotated(cira_ctx* ctx, const uint8_t* rgb_data, int width, int
                ctx->num_detections * sizeof(cira_detection_t));
         ctx->prev_num_detections = ctx->num_detections;
         ctx->prev_detection_frame = ctx->frame_sequence;
+        ctx->prev_detection_time = now;
     } else if (ctx->prev_num_detections > 0 &&
-               (ctx->frame_sequence - ctx->prev_detection_frame) <= 3) {
-        /* Use previous detections if within 3 frames */
+               (now - ctx->prev_detection_time) <= DETECTION_PERSIST_MS) {
+        /* Use previous detections if within persistence timeout (500ms) */
         dets = ctx->prev_detections;
         num_dets = ctx->prev_num_detections;
     }

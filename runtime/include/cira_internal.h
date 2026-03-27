@@ -107,6 +107,7 @@ struct cira_ctx {
     cira_detection_t prev_detections[CIRA_MAX_DETECTIONS];
     int prev_num_detections;
     uint64_t prev_detection_frame;  /* Frame number when prev_detections was set */
+    uint64_t prev_detection_time;   /* Timestamp (ms) when prev_detections was set */
 
     /* Streaming state */
     int camera_running;

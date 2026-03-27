@@ -23,6 +23,7 @@ const emit = defineEmits<{
 // Canvas for polling mode (flicker-free)
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLDivElement | null>(null);
+const mjpegImgRef = ref<HTMLImageElement | null>(null);
 let ctx: CanvasRenderingContext2D | null = null;
 
 // State
@@ -34,6 +35,7 @@ const lastSequence = ref(0);
 const streamError = ref(false);
 const lastFrameTime = ref(0);
 const hasFrame = ref(false);
+const blankFrameCount = ref(0);
 
 let pollTimer: number | null = null;
 let connectionTimeout: number | null = null;
@@ -41,8 +43,10 @@ let mjpegWatchdog: number | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let pendingBlobUrl: string | null = null;
 
-// Higher timeout to handle slow inference (model inference can take 50-100ms per frame)
-const MJPEG_STALL_TIMEOUT = 10000;
+// Stall timeout - if no valid frames for this long, reconnect
+const MJPEG_STALL_TIMEOUT = 5000;
+// Blank frame threshold - if img has no content for this many checks, reconnect
+const BLANK_FRAME_THRESHOLD = 3;
 
 const baseUrl = computed(() => `http://${props.host}:${props.port}`);
 
@@ -129,34 +133,52 @@ function clearMjpegWatchdog() {
   }
 }
 
-// MJPEG watchdog - detect truly stalled streams (not just slow inference)
+// MJPEG watchdog - detect blank/stalled streams by checking actual image content
 function startMjpegWatchdog() {
   clearMjpegWatchdog();
   lastFrameTime.value = Date.now();
+  blankFrameCount.value = 0;
 
   mjpegWatchdog = window.setInterval(() => {
     if (activeMode.value !== 'mjpeg' || loading.value) return;
 
-    const timeSinceLastFrame = Date.now() - lastFrameTime.value;
-    if (timeSinceLastFrame > MJPEG_STALL_TIMEOUT) {
-      console.log(`MJPEG stream stalled (${timeSinceLastFrame}ms), reconnecting...`);
-      errorCount.value++;
+    // Check if the img element actually has content (naturalWidth > 0)
+    const img = mjpegImgRef.value;
+    const hasContent = img && img.naturalWidth > 0 && img.naturalHeight > 0;
 
-      // Only reconnect after multiple stalls to avoid flicker from aggressive reconnection
-      if (errorCount.value >= 2) {
-        mjpegSrc.value = '';
-        setTimeout(() => {
-          mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
-          lastFrameTime.value = Date.now();
-        }, 100);
-      }
+    if (hasContent) {
+      // Stream is working - reset counters
+      blankFrameCount.value = 0;
+      lastFrameTime.value = Date.now();
+    } else {
+      // No content - increment blank counter
+      blankFrameCount.value++;
+      console.log(`MJPEG blank frame detected (count: ${blankFrameCount.value})`);
+    }
+
+    // Check for stall (no valid content for too long)
+    const timeSinceLastFrame = Date.now() - lastFrameTime.value;
+    const isStalled = timeSinceLastFrame > MJPEG_STALL_TIMEOUT ||
+                      blankFrameCount.value >= BLANK_FRAME_THRESHOLD;
+
+    if (isStalled) {
+      console.log(`MJPEG stream stalled (blank: ${blankFrameCount.value}, time: ${timeSinceLastFrame}ms), reconnecting...`);
+      errorCount.value++;
+      blankFrameCount.value = 0;
+
+      // Reconnect by refreshing the stream URL
+      mjpegSrc.value = '';
+      setTimeout(() => {
+        mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+        lastFrameTime.value = Date.now();
+      }, 100);
 
       if (props.mode === 'auto' && errorCount.value >= 5) {
         console.log('MJPEG keeps stalling, switching to polling mode');
         startPolling();
       }
     }
-  }, 3000);  // Check less frequently
+  }, 1500);  // Check every 1.5 seconds
 }
 
 // Start MJPEG mode - uses native img tag for continuous streaming
@@ -408,6 +430,7 @@ defineExpose({
 
     <!-- MJPEG mode: Native img tag (browser handles continuous stream) -->
     <img
+      ref="mjpegImgRef"
       v-if="activeMode === 'mjpeg' && mjpegSrc && !streamError"
       :src="mjpegSrc"
       alt="Camera feed"
