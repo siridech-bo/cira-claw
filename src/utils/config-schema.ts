@@ -1,10 +1,20 @@
 import { z } from 'zod';
 
+// go2rtc configuration schema
+export const Go2RTCConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  apiPort: z.number().int().min(1).max(65535).default(1984),
+  webrtcPort: z.number().int().min(1).max(65535).default(8555),
+  binaryPath: z.string().optional(),
+  stunServers: z.array(z.string()).default(['stun:stun.l.google.com:19302']),
+});
+
 // Gateway configuration schema
 export const GatewayConfigSchema = z.object({
   port: z.number().int().min(1).max(65535).default(18790),
   host: z.string().default('0.0.0.0'),
   name: z.string().default('CiRA Edge Gateway'),
+  go2rtc: Go2RTCConfigSchema.optional(),
 });
 
 // Agent configuration schema
@@ -83,6 +93,7 @@ export const CiraConfigSchema = z.object({
 
 export type CiraConfig = z.infer<typeof CiraConfigSchema>;
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
+export type Go2RTCConfig = z.infer<typeof Go2RTCConfigSchema>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 export type ChannelsConfig = z.infer<typeof ChannelsConfigSchema>;
 export type DiscoveryConfig = z.infer<typeof DiscoveryConfigSchema>;

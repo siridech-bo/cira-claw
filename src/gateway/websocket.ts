@@ -194,6 +194,29 @@ export class WebSocketHandler {
   getClientCount(): number {
     return this.clients.size;
   }
+
+  // Trigger page reload on all connected clients
+  triggerPageReload(reason: string = 'scheduled'): void {
+    logger.info(`Broadcasting page reload to ${this.clients.size} clients (reason: ${reason})`);
+    this.broadcastAll({
+      type: 'page:reload',
+      payload: {
+        reason,
+        timestamp: Date.now(),
+      },
+    });
+  }
+
+  // Send reload warning before actual reload
+  sendReloadWarning(secondsUntilReload: number): void {
+    this.broadcastAll({
+      type: 'page:reload_warning',
+      payload: {
+        secondsUntilReload,
+        timestamp: Date.now(),
+      },
+    });
+  }
 }
 
 // Register WebSocket routes

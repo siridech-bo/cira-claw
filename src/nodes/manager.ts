@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { NodeConfig } from '../utils/config-schema.js';
 import { createLogger } from '../utils/logger.js';
 import { ConfigLoader } from '../config.js';
+import type { Go2RTCService } from '../services/go2rtc-service.js';
 
 const logger = createLogger('node-manager');
 
@@ -41,10 +42,77 @@ export class NodeManager extends EventEmitter {
   private configLoader: ConfigLoader;
   private statuses: Map<string, NodeStatus> = new Map();
   private healthCheckInterval: NodeJS.Timeout | null = null;
+  private go2rtcService: Go2RTCService | null = null;
 
   constructor(configLoader: ConfigLoader) {
     super();
     this.configLoader = configLoader;
+  }
+
+  // Set the go2rtc service for stream registration
+  setGo2RTCService(service: Go2RTCService | null): void {
+    this.go2rtcService = service;
+
+    if (service) {
+      // Register streams for already-online nodes
+      for (const [nodeId, status] of this.statuses) {
+        if (status.status === 'online') {
+          this.registerNodeStreams(nodeId);
+        }
+      }
+    }
+  }
+
+  // Get the go2rtc service
+  getGo2RTCService(): Go2RTCService | null {
+    return this.go2rtcService;
+  }
+
+  // Register streams for a node with go2rtc
+  private async registerNodeStreams(nodeId: string): Promise<void> {
+    if (!this.go2rtcService || !this.go2rtcService.isRunning()) {
+      return;
+    }
+
+    const node = this.getNode(nodeId);
+    if (!node) {
+      return;
+    }
+
+    try {
+      // Register annotated stream with FFmpeg transcoding (MJPEG -> H264 for WebRTC)
+      const annotatedUrl = `http://${node.host}:${node.runtime.port}/stream/annotated`;
+      const annotatedFfmpeg = `ffmpeg:${annotatedUrl}#video=h264`;
+
+      logger.info(`Registering go2rtc stream: ${nodeId}-annotated -> ${annotatedFfmpeg}`);
+      await this.go2rtcService.registerStream(`${nodeId}-annotated`, annotatedFfmpeg);
+
+      // Register raw stream with FFmpeg transcoding
+      const rawUrl = `http://${node.host}:${node.runtime.port}/stream/raw`;
+      const rawFfmpeg = `ffmpeg:${rawUrl}#video=h264`;
+
+      logger.info(`Registering go2rtc stream: ${nodeId}-raw -> ${rawFfmpeg}`);
+      await this.go2rtcService.registerStream(`${nodeId}-raw`, rawFfmpeg);
+
+      logger.info(`Registered go2rtc streams for node ${nodeId}`);
+    } catch (error) {
+      logger.error(`Failed to register go2rtc streams for ${nodeId}: ${error}`);
+    }
+  }
+
+  // Unregister streams for a node from go2rtc
+  private async unregisterNodeStreams(nodeId: string): Promise<void> {
+    if (!this.go2rtcService) {
+      return;
+    }
+
+    try {
+      await this.go2rtcService.unregisterStream(`${nodeId}-annotated`);
+      await this.go2rtcService.unregisterStream(`${nodeId}-raw`);
+      logger.info(`Unregistered go2rtc streams for node ${nodeId}`);
+    } catch (error) {
+      logger.error(`Failed to unregister go2rtc streams for ${nodeId}: ${error}`);
+    }
   }
 
   // Initialize node manager and load existing nodes
@@ -143,13 +211,17 @@ export class NodeManager extends EventEmitter {
     this.statuses.set(id, newStatus);
     this.emit('node:status', newStatus);
 
-    // Emit online/offline events
+    // Emit online/offline events and manage go2rtc streams
     if (prevStatus !== 'online' && newStatus.status === 'online') {
       this.emit('node:online', id);
       logger.info(`Node ${id} is now online`);
+      // Register streams with go2rtc
+      this.registerNodeStreams(id);
     } else if (prevStatus === 'online' && newStatus.status === 'offline') {
       this.emit('node:offline', id);
       logger.warn(`Node ${id} is now offline`);
+      // Unregister streams from go2rtc
+      this.unregisterNodeStreams(id);
     }
   }
 

@@ -18,6 +18,7 @@ import { createStateStore, StateStore } from './services/state-store.js';
 import { createCompositeRuleEngine, CompositeRuleEngine } from './services/composite-rule-engine.js';
 import { createActionRunner, ActionRunner } from './services/action-runner.js';
 import { createSignalBridgeService, SignalBridgeService } from './services/signal-bridge.js';
+import { createGo2RTCService, Go2RTCService } from './services/go2rtc-service.js';
 import { createLogger, logger as rootLogger } from './utils/logger.js';
 import { CiraConfig } from './utils/config-schema.js';
 
@@ -38,9 +39,15 @@ let stateStore: StateStore | null = null;
 let compositeRuleEngine: CompositeRuleEngine | null = null;
 let actionRunner: ActionRunner | null = null;
 let signalBridge: SignalBridgeService | null = null;
+let go2rtcService: Go2RTCService | null = null;
+let pageReloadTimer: NodeJS.Timeout | null = null;
 let config: CiraConfig;
 let configPath: string | undefined;
 let isShuttingDown = false;
+
+// Page reload interval for browser memory stability (25 minutes)
+const PAGE_RELOAD_INTERVAL_MS = 25 * 60 * 1000;
+const PAGE_RELOAD_WARNING_SECONDS = 30;
 
 /**
  * Graceful shutdown handler
@@ -61,6 +68,18 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }, 30000); // 30 second timeout
 
   try {
+    // Stop page reload scheduler
+    if (pageReloadTimer) {
+      clearInterval(pageReloadTimer);
+      pageReloadTimer = null;
+    }
+
+    // Stop go2rtc service
+    if (go2rtcService) {
+      logger.debug('Stopping go2rtc service...');
+      await go2rtcService.stop();
+    }
+
     // Stop stats collector
     if (statsCollector) {
       logger.debug('Stopping stats collector...');
@@ -180,6 +199,42 @@ function setupErrorHandlers(): void {
       process.exit(1);
     }, 100);
   });
+}
+
+/**
+ * Start scheduled page reload for browser memory stability
+ * Sends warning 30 seconds before reload, then triggers reload
+ */
+function startPageReloadScheduler(): void {
+  if (pageReloadTimer) {
+    clearInterval(pageReloadTimer);
+  }
+
+  logger.info(`Page reload scheduler started (interval: ${PAGE_RELOAD_INTERVAL_MS / 60000} minutes)`);
+
+  // Schedule reload cycle
+  const scheduleReloadCycle = () => {
+    // First, wait for the main interval minus warning time
+    setTimeout(() => {
+      // Send warning
+      if (wsHandler) {
+        wsHandler.sendReloadWarning(PAGE_RELOAD_WARNING_SECONDS);
+        logger.info(`Sent page reload warning to ${wsHandler.getClientCount()} clients`);
+      }
+
+      // Then wait for warning period and trigger reload
+      setTimeout(() => {
+        if (wsHandler) {
+          wsHandler.triggerPageReload('scheduled_memory_cleanup');
+        }
+        // Schedule next cycle
+        scheduleReloadCycle();
+      }, PAGE_RELOAD_WARNING_SECONDS * 1000);
+
+    }, PAGE_RELOAD_INTERVAL_MS - (PAGE_RELOAD_WARNING_SECONDS * 1000));
+  };
+
+  scheduleReloadCycle();
 }
 
 /**
@@ -373,8 +428,32 @@ async function main(): Promise<void> {
       signalBridge = null;
     }
 
-    // Start health checks
+    // Start health checks BEFORE go2rtc so nodes are online when streams are registered
     nodeManager.startHealthChecks(30000); // Every 30 seconds
+
+    // Wait for initial health check to complete (so nodes are online)
+    logger.info('Running initial health check for nodes...');
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Give health check time to complete
+
+    // Initialize go2rtc service for WebRTC camera streaming (if enabled)
+    if (config.gateway.go2rtc?.enabled) {
+      go2rtcService = createGo2RTCService({
+        enabled: true,
+        apiPort: config.gateway.go2rtc.apiPort ?? 1984,
+        webrtcPort: config.gateway.go2rtc.webrtcPort ?? 8555,
+        binaryPath: config.gateway.go2rtc.binaryPath,
+        stunServers: config.gateway.go2rtc.stunServers ?? ['stun:stun.l.google.com:19302'],
+      });
+
+      try {
+        await go2rtcService.start();
+        nodeManager.setGo2RTCService(go2rtcService);
+        logger.info(`go2rtc started - API: http://localhost:${config.gateway.go2rtc.apiPort ?? 1984}`);
+      } catch (error) {
+        logger.warn(`Failed to start go2rtc: ${error}`);
+        go2rtcService = null;
+      }
+    }
 
     // Setup signal handlers before starting server
     setupSignalHandlers();
@@ -394,11 +473,18 @@ async function main(): Promise<void> {
     if (modbusServer) {
       logger.info(`  MODBUS: tcp://${host}:${config.channels.modbus.port}`);
     }
+    if (go2rtcService) {
+      logger.info(`  go2rtc API: http://localhost:${config.gateway.go2rtc?.apiPort ?? 1984}`);
+      logger.info(`  WebRTC: ws://localhost:${config.gateway.go2rtc?.apiPort ?? 1984}/api/ws`);
+    }
 
     // Log ready status for systemd
     if (process.env.NODE_ENV === 'production') {
       logger.info('Gateway ready and accepting connections');
     }
+
+    // Start scheduled page reload for browser memory stability
+    startPageReloadScheduler();
 
   } catch (error) {
     logger.fatal({ err: error }, 'Failed to start gateway');

@@ -348,7 +348,7 @@ export async function registerApiRoutes(
     }
   );
 
-  // Get stream URL for a node
+  // Get stream URL for a node (including WebRTC via go2rtc if enabled)
   fastify.get<{ Params: NodeParams }>(
     '/api/nodes/:id/stream',
     async (request: FastifyRequest<{ Params: NodeParams }>, reply: FastifyReply) => {
@@ -362,13 +362,27 @@ export async function registerApiRoutes(
         });
       }
 
+      // Get go2rtc service from node manager
+      const go2rtcService = nodeManager.getGo2RTCService();
+      const go2rtcEnabled = go2rtcService?.isRunning() || false;
+
+      // Base MJPEG streams (always available)
+      const streams: Record<string, string> = {
+        mjpeg: `http://${node.host}:${node.runtime.port}/stream/annotated`,
+        raw_mjpeg: `http://${node.host}:${node.runtime.port}/stream/raw`,
+        websocket: `ws://${node.host}:${node.runtime.port}/ws/video`,
+      };
+
+      // Add WebRTC URLs if go2rtc is running
+      if (go2rtcEnabled && go2rtcService) {
+        streams.webrtc = go2rtcService.getWebRTCUrl(`${id}-annotated`);
+        streams.raw_webrtc = go2rtcService.getWebRTCUrl(`${id}-raw`);
+      }
+
       return {
         nodeId: id,
-        streams: {
-          raw: `http://${node.host}:${node.runtime.port}/stream/raw`,
-          annotated: `http://${node.host}:${node.runtime.port}/stream/annotated`,
-          websocket: `ws://${node.host}:${node.runtime.port}/ws/video`,
-        },
+        streams,
+        go2rtcEnabled,
       };
     }
   );

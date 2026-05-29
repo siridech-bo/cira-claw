@@ -41,6 +41,7 @@ echo.
 echo   Runtime:   http://localhost:8080
 echo   Gateway:   http://localhost:18790
 echo   Dashboard: http://localhost:3000
+echo   go2rtc:    http://localhost:1984 (if enabled)
 echo.
 echo Press any key to close this window...
 pause > nul

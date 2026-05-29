@@ -18,69 +18,147 @@ interface Node {
   };
 }
 
+interface NodeStreamInfo {
+  mjpeg: string;
+  raw_mjpeg: string;
+  websocket?: string;
+  webrtc?: string;
+  raw_webrtc?: string;
+}
+
 const nodes = ref<Node[]>([]);
+const nodeStreams = ref<Map<string, NodeStreamInfo>>(new Map());
+const go2rtcEnabled = ref(false);
 const loading = ref(true);
 const gridSize = ref<'2x2' | '3x3'>('2x2');
-const streamMode = ref<'auto' | 'mjpeg' | 'polling'>('auto');
+const streamMode = ref<'auto' | 'webrtc' | 'mjpeg'>('auto');
 
 // Track stream component refs for refresh
 const streamRefs = ref<Record<string, InstanceType<typeof CameraStream> | null>>({});
 
 let refreshInterval: number | null = null;
 let pageRefreshTimer: number | null = null;
-const pageStartTime = Date.now();
+let wsConnection: WebSocket | null = null;
 const showRefreshWarning = ref(false);
+const reloadCountdown = ref(0);
 
-// Auto page refresh after 15 minutes to prevent memory buildup
-const PAGE_AUTO_REFRESH_MS = 15 * 60 * 1000; // 15 minutes (more aggressive for factory use)
-const PAGE_WARNING_BEFORE_MS = 30 * 1000; // Warning 30 seconds before
+// Client-side fallback timer (35 minutes - longer than server's 25 min cycle)
+const CLIENT_FALLBACK_REFRESH_MS = 35 * 60 * 1000;
 
 const onlineNodes = computed(() =>
   nodes.value.filter(n => n.status === 'online')
 );
+
+// Connect to WebSocket for server-triggered reloads
+function connectWebSocket() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+  wsConnection = new WebSocket(wsUrl);
+
+  wsConnection.onopen = () => {
+    console.log('WebSocket connected for reload signals');
+  };
+
+  wsConnection.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+
+      if (msg.type === 'page:reload_warning') {
+        // Server is warning us about upcoming reload
+        showRefreshWarning.value = true;
+        reloadCountdown.value = msg.payload.secondsUntilReload;
+
+        // Start countdown
+        const countdownInterval = setInterval(() => {
+          reloadCountdown.value--;
+          if (reloadCountdown.value <= 0) {
+            clearInterval(countdownInterval);
+          }
+        }, 1000);
+      } else if (msg.type === 'page:reload') {
+        // Server triggered immediate reload
+        console.log('Server triggered page reload:', msg.payload.reason);
+        window.location.reload();
+      }
+    } catch (e) {
+      // Ignore non-JSON messages
+    }
+  };
+
+  wsConnection.onclose = () => {
+    console.log('WebSocket disconnected, reconnecting in 5s...');
+    setTimeout(connectWebSocket, 5000);
+  };
+
+  wsConnection.onerror = (err) => {
+    console.error('WebSocket error:', err);
+  };
+}
+
+// Client-side fallback timer (in case WebSocket fails)
+function startFallbackTimer() {
+  if (pageRefreshTimer) {
+    clearTimeout(pageRefreshTimer);
+  }
+
+  pageRefreshTimer = window.setTimeout(() => {
+    showRefreshWarning.value = true;
+    reloadCountdown.value = 30;
+
+    const countdownInterval = setInterval(() => {
+      reloadCountdown.value--;
+      if (reloadCountdown.value <= 0) {
+        clearInterval(countdownInterval);
+        if (showRefreshWarning.value) {
+          window.location.reload();
+        }
+      }
+    }, 1000);
+  }, CLIENT_FALLBACK_REFRESH_MS - 30000);
+}
+
+// Stop timers
+function stopTimers() {
+  if (pageRefreshTimer) {
+    clearTimeout(pageRefreshTimer);
+    pageRefreshTimer = null;
+  }
+  if (wsConnection) {
+    wsConnection.close();
+    wsConnection = null;
+  }
+  showRefreshWarning.value = false;
+}
 
 onMounted(async () => {
   await fetchNodes();
   // Refresh node status every 10 seconds
   refreshInterval = window.setInterval(fetchNodes, 10000);
 
-  // Setup auto page refresh to prevent memory buildup from long-running streams
-  pageRefreshTimer = window.setTimeout(() => {
-    showRefreshWarning.value = true;
-    // Auto refresh after warning period
-    setTimeout(() => {
-      if (showRefreshWarning.value) {
-        window.location.reload();
-      }
-    }, PAGE_WARNING_BEFORE_MS);
-  }, PAGE_AUTO_REFRESH_MS - PAGE_WARNING_BEFORE_MS);
+  // Connect WebSocket for server-triggered reloads
+  connectWebSocket();
+
+  // Client-side fallback timer (35 min, in case WebSocket fails)
+  startFallbackTimer();
 });
 
 onUnmounted(() => {
   if (refreshInterval) {
     clearInterval(refreshInterval);
   }
-  if (pageRefreshTimer) {
-    clearTimeout(pageRefreshTimer);
-  }
+  stopTimers();
 });
 
-// Dismiss refresh warning and postpone by 15 minutes
+
+// Dismiss refresh warning and postpone
 function dismissRefreshWarning() {
   showRefreshWarning.value = false;
-  // Postpone auto-refresh by 15 minutes
-  if (pageRefreshTimer) {
-    clearTimeout(pageRefreshTimer);
-  }
-  pageRefreshTimer = window.setTimeout(() => {
-    showRefreshWarning.value = true;
-    setTimeout(() => {
-      if (showRefreshWarning.value) {
-        window.location.reload();
-      }
-    }, PAGE_WARNING_BEFORE_MS);
-  }, 15 * 60 * 1000); // 15 minutes postpone
+  reloadCountdown.value = 0;
+  // Restart fallback timer
+  startFallbackTimer();
 }
+
 
 // Manual refresh now
 function refreshPageNow() {
@@ -96,11 +174,41 @@ async function fetchNodes() {
     if (!response.ok) throw new Error('Failed to fetch');
     const data = await response.json();
     nodes.value = data.nodes;
+
+    // Fetch stream URLs for online nodes (includes WebRTC URLs if go2rtc is enabled)
+    const onlineNodeIds = data.nodes
+      .filter((n: Node) => n.status === 'online')
+      .map((n: Node) => n.id);
+
+    await Promise.all(onlineNodeIds.map(fetchStreamUrls));
   } catch (e) {
     console.error('Failed to load nodes:', e);
   } finally {
     loading.value = false;
   }
+}
+
+// Fetch stream URLs for a specific node (includes WebRTC if go2rtc enabled)
+async function fetchStreamUrls(nodeId: string) {
+  try {
+    const response = await fetch(`/api/nodes/${nodeId}/stream`);
+    if (!response.ok) return;
+
+    const data = await response.json();
+    nodeStreams.value.set(nodeId, data.streams);
+
+    // Track if go2rtc is enabled (from any node response)
+    if (data.go2rtcEnabled) {
+      go2rtcEnabled.value = true;
+    }
+  } catch (e) {
+    console.error(`Failed to fetch stream URLs for ${nodeId}:`, e);
+  }
+}
+
+// Get WebRTC URL for a node (if available)
+function getWebRTCUrl(nodeId: string): string | undefined {
+  return nodeStreams.value.get(nodeId)?.webrtc;
 }
 
 // Force refresh a specific stream
@@ -121,9 +229,12 @@ function handleStreamError(nodeId: string, msg: string) {
   <div class="camera-grid-page">
     <!-- Memory refresh warning -->
     <div class="refresh-warning" v-if="showRefreshWarning">
-      <span>Page will auto-refresh to prevent memory issues</span>
+      <span>
+        Page will auto-refresh for memory stability
+        <strong v-if="reloadCountdown > 0"> ({{ reloadCountdown }}s)</strong>
+      </span>
       <div class="refresh-actions">
-        <button class="postpone-btn" @click="dismissRefreshWarning">Postpone 15min</button>
+        <button class="postpone-btn" @click="dismissRefreshWarning">Postpone</button>
         <button class="refresh-now-btn" @click="refreshPageNow">Refresh Now</button>
       </div>
     </div>
@@ -134,9 +245,9 @@ function handleStreamError(nodeId: string, msg: string) {
         <div class="mode-selector">
           <label>Mode:</label>
           <select v-model="streamMode">
-            <option value="auto">Auto</option>
+            <option value="auto">Auto{{ go2rtcEnabled ? ' (WebRTC)' : '' }}</option>
+            <option value="webrtc" v-if="go2rtcEnabled">WebRTC</option>
             <option value="mjpeg">MJPEG</option>
-            <option value="polling">Polling</option>
           </select>
         </div>
         <div class="grid-controls">
@@ -174,6 +285,7 @@ function handleStreamError(nodeId: string, msg: string) {
           :port="node.runtime?.port || 8080"
           :annotated="true"
           :mode="streamMode"
+          :webrtc-url="getWebRTCUrl(node.id)"
           @error="handleStreamError(node.id, $event)"
         />
         <div class="camera-overlay">

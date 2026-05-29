@@ -5,49 +5,45 @@ interface Props {
   host: string;
   port: number;
   annotated?: boolean;
-  mode?: 'auto' | 'mjpeg' | 'polling';
-  pollInterval?: number;
+  mode?: 'auto' | 'webrtc' | 'mjpeg';
+  webrtcUrl?: string;  // WebRTC signaling URL from go2rtc
 }
 
 const props = withDefaults(defineProps<Props>(), {
   annotated: true,
   mode: 'auto',
-  pollInterval: 100,
 });
 
 const emit = defineEmits<{
   (e: 'error', msg: string): void;
-  (e: 'modeChange', mode: 'mjpeg' | 'polling'): void;
+  (e: 'modeChange', mode: 'webrtc' | 'mjpeg'): void;
 }>();
 
-// Canvas for polling mode (flicker-free)
-const canvasRef = ref<HTMLCanvasElement | null>(null);
-const containerRef = ref<HTMLDivElement | null>(null);
 const mjpegImgRef = ref<HTMLImageElement | null>(null);
-let ctx: CanvasRenderingContext2D | null = null;
+const videoRef = ref<HTMLVideoElement | null>(null);  // WebRTC video element
 
 // State
-const activeMode = ref<'mjpeg' | 'polling'>(props.mode === 'polling' ? 'polling' : 'mjpeg');
+const activeMode = ref<'webrtc' | 'mjpeg'>(
+  props.mode === 'webrtc' ? 'webrtc' : 'mjpeg'
+);
 const mjpegSrc = ref('');
 const loading = ref(true);
 const errorCount = ref(0);
-const lastSequence = ref(0);
 const streamError = ref(false);
 const lastFrameTime = ref(0);
 const hasFrame = ref(false);
 const blankFrameCount = ref(0);
 
-let pollTimer: number | null = null;
+// WebRTC state
+let peerConnection: RTCPeerConnection | null = null;
+let webrtcRetryCount = 0;
+const MAX_WEBRTC_RETRIES = 3;
+const WEBRTC_CONNECTION_TIMEOUT = 10000;  // 10 seconds
+
 let connectionTimeout: number | null = null;
 let mjpegWatchdog: number | null = null;
 let mjpegMemoryTimer: number | null = null;
-let resizeObserver: ResizeObserver | null = null;
-let pendingBlobUrl: string | null = null;
-
-// Reusable Image object for polling mode (prevents memory leak from creating new Images)
-let reusableImage: HTMLImageElement | null = null;
-let frameCount = 0;
-const RESET_IMAGE_EVERY_N_FRAMES = 500; // Reset image object every 500 frames to prevent corruption
+let webrtcConnectionTimer: number | null = null;
 
 // Stall timeout - if no valid frames for this long, reconnect
 const MJPEG_STALL_TIMEOUT = 5000;
@@ -62,86 +58,6 @@ const mjpegUrl = computed(() => {
   const endpoint = props.annotated ? '/stream/annotated' : '/stream/raw';
   return `${baseUrl.value}${endpoint}`;
 });
-
-const frameUrl = computed(() => {
-  return `${baseUrl.value}/frame/latest`;
-});
-
-// Initialize canvas for polling mode
-function initCanvas() {
-  if (!canvasRef.value) return;
-  ctx = canvasRef.value.getContext('2d', {
-    alpha: false,
-    desynchronized: true,
-    willReadFrequently: false,
-  });
-  if (ctx) {
-    // Disable smoothing for sharper image rendering
-    ctx.imageSmoothingEnabled = false;
-  }
-  updateCanvasSize();
-}
-
-function updateCanvasSize() {
-  if (!canvasRef.value || !containerRef.value) return;
-
-  const rect = containerRef.value.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-
-  // Set canvas resolution to match display size * DPR
-  canvasRef.value.width = Math.floor(rect.width * dpr);
-  canvasRef.value.height = Math.floor(rect.height * dpr);
-
-  // Reset context state after resize (canvas resize clears context)
-  if (ctx) {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-  }
-}
-
-// Draw frame to canvas (for polling mode)
-function drawFrame(img: HTMLImageElement) {
-  if (!ctx || !canvasRef.value || !containerRef.value) return;
-  if (!img.naturalWidth || !img.naturalHeight) return; // Skip invalid images
-
-  const rect = containerRef.value.getBoundingClientRect();
-  const canvasWidth = rect.width;
-  const canvasHeight = rect.height;
-  const dpr = window.devicePixelRatio || 1;
-
-  const imgAspect = img.naturalWidth / img.naturalHeight;
-  const canvasAspect = canvasWidth / canvasHeight;
-
-  let drawWidth: number, drawHeight: number, drawX: number, drawY: number;
-
-  if (imgAspect > canvasAspect) {
-    drawWidth = canvasWidth;
-    drawHeight = canvasWidth / imgAspect;
-    drawX = 0;
-    drawY = (canvasHeight - drawHeight) / 2;
-  } else {
-    drawHeight = canvasHeight;
-    drawWidth = canvasHeight * imgAspect;
-    drawX = (canvasWidth - drawWidth) / 2;
-    drawY = 0;
-  }
-
-  // Reset context state before drawing to prevent accumulated corruption
-  ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // Apply DPR scaling
-  ctx.imageSmoothingEnabled = false;
-
-  // Clear background
-  ctx.fillStyle = '#0F172A';
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-  // Draw image
-  ctx.drawImage(img, Math.floor(drawX), Math.floor(drawY), Math.ceil(drawWidth), Math.ceil(drawHeight));
-
-  hasFrame.value = true;
-}
 
 function clearConnectionTimeout() {
   if (connectionTimeout) {
@@ -177,6 +93,161 @@ function startMjpegMemoryCleanup() {
       lastFrameTime.value = Date.now();
     }, 100);
   }, MJPEG_MEMORY_CLEANUP_INTERVAL);
+}
+
+// Clear WebRTC connection timer
+function clearWebRTCConnectionTimer() {
+  if (webrtcConnectionTimer) {
+    clearTimeout(webrtcConnectionTimer);
+    webrtcConnectionTimer = null;
+  }
+}
+
+// Stop WebRTC connection
+function stopWebRTC() {
+  clearWebRTCConnectionTimer();
+
+  if (peerConnection) {
+    peerConnection.ontrack = null;
+    peerConnection.onconnectionstatechange = null;
+    peerConnection.close();
+    peerConnection = null;
+  }
+
+  // Clear video source
+  if (videoRef.value) {
+    videoRef.value.srcObject = null;
+  }
+}
+
+// Start WebRTC mode - uses go2rtc HTTP POST signaling
+async function startWebRTC() {
+  if (!props.webrtcUrl) {
+    console.log('No WebRTC URL provided, falling back to MJPEG');
+    startMjpeg();
+    return;
+  }
+
+  activeMode.value = 'webrtc';
+  loading.value = true;
+  streamError.value = false;
+  hasFrame.value = false;
+  clearConnectionTimeout();
+  clearMjpegWatchdog();
+  clearMjpegMemoryTimer();
+  stopWebRTC();
+
+  emit('modeChange', 'webrtc');
+
+  // Connection timeout - fall back to MJPEG if WebRTC fails
+  webrtcConnectionTimer = window.setTimeout(() => {
+    if (loading.value && activeMode.value === 'webrtc') {
+      console.log('WebRTC connection timeout, falling back to MJPEG');
+      webrtcRetryCount++;
+      if (webrtcRetryCount >= MAX_WEBRTC_RETRIES) {
+        console.log('Max WebRTC retries reached, using MJPEG');
+        startMjpeg();
+      } else {
+        // Retry WebRTC
+        startWebRTC();
+      }
+    }
+  }, WEBRTC_CONNECTION_TIMEOUT);
+
+  try {
+    // Create RTCPeerConnection with STUN servers
+    peerConnection = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
+    });
+
+    // Handle incoming media track
+    peerConnection.ontrack = (event) => {
+      console.log('WebRTC track received:', event.track.kind);
+      if (videoRef.value && event.streams[0]) {
+        videoRef.value.srcObject = event.streams[0];
+        loading.value = false;
+        hasFrame.value = true;
+        webrtcRetryCount = 0;
+        clearWebRTCConnectionTimer();
+      }
+    };
+
+    // Monitor connection state
+    peerConnection.onconnectionstatechange = () => {
+      console.log('WebRTC connection state:', peerConnection?.connectionState);
+      if (peerConnection?.connectionState === 'failed' ||
+          peerConnection?.connectionState === 'disconnected') {
+        console.log('WebRTC connection failed/disconnected');
+        if (props.mode === 'auto' || props.mode === 'webrtc') {
+          // Try to reconnect or fall back
+          webrtcRetryCount++;
+          if (webrtcRetryCount >= MAX_WEBRTC_RETRIES) {
+            console.log('Max WebRTC retries reached, falling back to MJPEG');
+            startMjpeg();
+          } else {
+            setTimeout(() => startWebRTC(), 2000);
+          }
+        }
+      }
+    };
+
+    // Add transceivers for receiving video
+    peerConnection.addTransceiver('video', { direction: 'recvonly' });
+
+    // Create SDP offer
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    // Wait for ICE gathering to complete (or timeout after 2s)
+    await new Promise<void>((resolve) => {
+      if (peerConnection?.iceGatheringState === 'complete') {
+        resolve();
+        return;
+      }
+      const checkState = () => {
+        if (peerConnection?.iceGatheringState === 'complete') {
+          resolve();
+        }
+      };
+      peerConnection?.addEventListener('icegatheringstatechange', checkState);
+      // Timeout after 2 seconds - proceed with partial candidates
+      setTimeout(resolve, 2000);
+    });
+
+    // Send offer to go2rtc via HTTP POST (this is the correct go2rtc API)
+    const response = await fetch(props.webrtcUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/sdp',
+      },
+      body: peerConnection.localDescription?.sdp,
+    });
+
+    if (!response.ok) {
+      throw new Error(`go2rtc returned ${response.status}`);
+    }
+
+    // Get answer SDP from response
+    const answerSdp = await response.text();
+
+    // Set remote description
+    await peerConnection.setRemoteDescription({
+      type: 'answer',
+      sdp: answerSdp,
+    });
+
+    console.log('WebRTC answer received and set');
+
+  } catch (err) {
+    console.error('Failed to start WebRTC:', err);
+    webrtcRetryCount++;
+    if (webrtcRetryCount >= MAX_WEBRTC_RETRIES || props.mode === 'auto') {
+      startMjpeg();
+    }
+  }
 }
 
 // MJPEG watchdog - detect blank/stalled streams by checking actual image content
@@ -219,10 +290,6 @@ function startMjpegWatchdog() {
         lastFrameTime.value = Date.now();
       }, 100);
 
-      if (props.mode === 'auto' && errorCount.value >= 5) {
-        console.log('MJPEG keeps stalling, switching to polling mode');
-        startPolling();
-      }
     }
   }, 1500);  // Check every 1.5 seconds
 }
@@ -245,15 +312,16 @@ function startMjpeg() {
   startMjpegWatchdog();
   startMjpegMemoryCleanup(); // Periodic reconnect to prevent memory buildup
 
-  // Connection timeout (longer to allow for slow inference startup)
-  if (props.mode === 'auto') {
-    connectionTimeout = window.setTimeout(() => {
-      if (loading.value && activeMode.value === 'mjpeg') {
-        console.log('MJPEG connection timeout, switching to polling mode');
-        startPolling();
-      }
-    }, 10000);
-  }
+  // Connection timeout - try to reconnect MJPEG
+  connectionTimeout = window.setTimeout(() => {
+    if (loading.value && activeMode.value === 'mjpeg') {
+      console.log('MJPEG connection timeout, reconnecting...');
+      mjpegSrc.value = '';
+      setTimeout(() => {
+        mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+      }, 500);
+    }
+  }, 10000);
 }
 
 // MJPEG load handler
@@ -265,140 +333,23 @@ function onMjpegLoad() {
   hasFrame.value = true;
 }
 
-// MJPEG error handler
+// MJPEG error handler - retry with backoff
 function onMjpegError() {
   errorCount.value++;
+  const backoff = Math.min(errorCount.value * 1000, 5000); // Max 5 second backoff
+  console.log(`MJPEG error (${errorCount.value}), retrying in ${backoff}ms...`);
 
-  if (props.mode === 'auto' && errorCount.value >= 3) {
-    console.log('MJPEG failed, switching to polling mode');
-    startPolling();
-  } else if (props.mode !== 'polling') {
-    setTimeout(() => {
-      mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
-    }, 2000);
-  }
-}
-
-// Start polling mode - uses canvas for flicker-free rendering
-function startPolling() {
-  activeMode.value = 'polling';
-  loading.value = true;
-  streamError.value = false;
-  hasFrame.value = false;
-  clearConnectionTimeout();
-  clearMjpegWatchdog();
-
-  // Clear MJPEG
-  mjpegSrc.value = '';
-
-  // Initialize canvas
-  nextTick(() => {
-    initCanvas();
-    emit('modeChange', 'polling');
-    pollFrame();
-  });
-}
-
-// Poll for new frame and draw to canvas
-async function pollFrame() {
-  if (activeMode.value !== 'polling') return;
-
-  try {
-    const response = await fetch(`${frameUrl.value}?_t=${Date.now()}`, {
-      cache: 'no-store',
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const seq = parseInt(response.headers.get('X-Frame-Sequence') || '0', 10);
-    const shouldUpdate = seq !== lastSequence.value || !hasFrame.value;
-
-    if (shouldUpdate || seq > lastSequence.value) {
-      lastSequence.value = seq;
-
-      const blob = await response.blob();
-
-      if (blob.size > 0) {
-        if (pendingBlobUrl) {
-          URL.revokeObjectURL(pendingBlobUrl);
-        }
-
-        pendingBlobUrl = URL.createObjectURL(blob);
-
-        // Periodically reset Image object to prevent color corruption over time
-        frameCount++;
-        if (!reusableImage || frameCount >= RESET_IMAGE_EVERY_N_FRAMES) {
-          // Clean up old image
-          if (reusableImage) {
-            reusableImage.onload = null;
-            reusableImage.onerror = null;
-            reusableImage.src = '';
-          }
-          reusableImage = new Image();
-          frameCount = 0;
-        }
-
-        reusableImage.onload = () => {
-          if (reusableImage) {
-            drawFrame(reusableImage);
-          }
-          if (pendingBlobUrl) {
-            URL.revokeObjectURL(pendingBlobUrl);
-            pendingBlobUrl = null;
-          }
-        };
-        reusableImage.onerror = () => {
-          if (pendingBlobUrl) {
-            URL.revokeObjectURL(pendingBlobUrl);
-            pendingBlobUrl = null;
-          }
-        };
-        reusableImage.src = pendingBlobUrl;
-      }
-    }
-
-    loading.value = false;
-    errorCount.value = 0;
-
-    pollTimer = window.setTimeout(pollFrame, props.pollInterval);
-  } catch (e) {
-    errorCount.value++;
-    if (errorCount.value < 10) {
-      pollTimer = window.setTimeout(pollFrame, 1000);
-    } else {
-      loading.value = false;
-      streamError.value = true;
-      emit('error', 'Failed to fetch frames');
-    }
-  }
+  setTimeout(() => {
+    mjpegSrc.value = mjpegUrl.value + `?_t=${Date.now()}`;
+  }, backoff);
 }
 
 function stopStream() {
   clearConnectionTimeout();
   clearMjpegWatchdog();
   clearMjpegMemoryTimer();
-
-  if (pollTimer) {
-    clearTimeout(pollTimer);
-    pollTimer = null;
-  }
-
+  stopWebRTC();
   mjpegSrc.value = '';
-
-  if (pendingBlobUrl) {
-    URL.revokeObjectURL(pendingBlobUrl);
-    pendingBlobUrl = null;
-  }
-
-  // Clean up reusable image
-  if (reusableImage) {
-    reusableImage.onload = null;
-    reusableImage.onerror = null;
-    reusableImage.src = '';
-    reusableImage = null;
-  }
 }
 
 function reconnect() {
@@ -406,9 +357,10 @@ function reconnect() {
   errorCount.value = 0;
   streamError.value = false;
   hasFrame.value = false;
+  webrtcRetryCount = 0;
 
-  if (props.mode === 'polling') {
-    startPolling();
+  if (props.mode === 'webrtc' || (props.mode === 'auto' && props.webrtcUrl)) {
+    startWebRTC();
   } else {
     startMjpeg();
   }
@@ -416,7 +368,7 @@ function reconnect() {
 
 function handleVisibilityChange() {
   if (document.visibilityState === 'visible') {
-    if (streamError.value || (loading.value && !pollTimer && !connectionTimeout)) {
+    if (streamError.value || (loading.value && !connectionTimeout)) {
       console.log('Tab visible, attempting reconnection');
       reconnect();
     }
@@ -426,17 +378,9 @@ function handleVisibilityChange() {
 onMounted(async () => {
   await nextTick();
 
-  if (containerRef.value) {
-    resizeObserver = new ResizeObserver(() => {
-      if (activeMode.value === 'polling') {
-        updateCanvasSize();
-      }
-    });
-    resizeObserver.observe(containerRef.value);
-  }
-
-  if (props.mode === 'polling') {
-    startPolling();
+  if (props.mode === 'webrtc' || (props.mode === 'auto' && props.webrtcUrl)) {
+    // Prefer WebRTC when available (better memory management)
+    startWebRTC();
   } else {
     startMjpeg();
   }
@@ -446,10 +390,21 @@ onMounted(async () => {
 
 watch(() => props.mode, (newMode) => {
   stopStream();
-  if (newMode === 'polling') {
-    startPolling();
+  webrtcRetryCount = 0;
+  if (newMode === 'webrtc' || (newMode === 'auto' && props.webrtcUrl)) {
+    startWebRTC();
   } else {
     startMjpeg();
+  }
+});
+
+// Watch for webrtcUrl changes - restart WebRTC if URL becomes available
+watch(() => props.webrtcUrl, (newUrl, oldUrl) => {
+  if (newUrl && !oldUrl && (props.mode === 'auto' || props.mode === 'webrtc')) {
+    // WebRTC URL became available, switch to WebRTC
+    stopStream();
+    webrtcRetryCount = 0;
+    startWebRTC();
   }
 });
 
@@ -459,12 +414,6 @@ watch([() => props.host, () => props.port], () => {
 
 onUnmounted(() => {
   stopStream();
-
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-    resizeObserver = null;
-  }
-
   document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 
@@ -473,10 +422,11 @@ defineExpose({
     reconnect();
   },
   reconnect,
-  switchMode(mode: 'mjpeg' | 'polling') {
+  switchMode(mode: 'webrtc' | 'mjpeg') {
     stopStream();
-    if (mode === 'polling') {
-      startPolling();
+    webrtcRetryCount = 0;
+    if (mode === 'webrtc') {
+      startWebRTC();
     } else {
       startMjpeg();
     }
@@ -485,7 +435,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="camera-stream" ref="containerRef">
+  <div class="camera-stream">
     <!-- Loading overlay -->
     <div class="loading-overlay" v-if="loading && !streamError">
       <span class="spinner"></span>
@@ -499,6 +449,17 @@ defineExpose({
       <button class="reconnect-btn" @click="reconnect">Reconnect</button>
     </div>
 
+    <!-- WebRTC mode: Native video element (best memory management) -->
+    <video
+      ref="videoRef"
+      v-show="activeMode === 'webrtc' && !streamError"
+      autoplay
+      playsinline
+      muted
+      class="stream-video"
+      :class="{ hidden: !hasFrame }"
+    ></video>
+
     <!-- MJPEG mode: Native img tag (browser handles continuous stream) -->
     <img
       ref="mjpegImgRef"
@@ -510,17 +471,9 @@ defineExpose({
       @error="onMjpegError"
     />
 
-    <!-- Polling mode: Canvas (flicker-free rendering) -->
-    <canvas
-      v-show="activeMode === 'polling' && !streamError"
-      ref="canvasRef"
-      class="stream-canvas"
-      :class="{ hidden: !hasFrame }"
-    ></canvas>
-
     <!-- Mode indicator -->
     <div class="mode-indicator" :class="activeMode" v-if="!streamError && hasFrame">
-      {{ activeMode === 'mjpeg' ? 'MJPEG' : 'Polling' }}
+      {{ activeMode === 'webrtc' ? 'WebRTC' : 'MJPEG' }}
     </div>
   </div>
 </template>
@@ -540,17 +493,14 @@ defineExpose({
   object-fit: contain;
 }
 
-.stream-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
+.stream-video {
   width: 100%;
   height: 100%;
-  will-change: contents;
-  transform: translateZ(0);
+  object-fit: contain;
+  background: #0F172A;
 }
 
-.stream-canvas.hidden {
+.stream-video.hidden {
   visibility: hidden;
 }
 
@@ -594,12 +544,12 @@ defineExpose({
   z-index: 5;
 }
 
-.mode-indicator.mjpeg {
-  color: #10B981;
+.mode-indicator.webrtc {
+  color: #6366F1;
 }
 
-.mode-indicator.polling {
-  color: #fbbf24;
+.mode-indicator.mjpeg {
+  color: #10B981;
 }
 
 .error-overlay {
