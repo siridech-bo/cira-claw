@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture - CiRA CLAW</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #10b981;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --accent: #f59e0b;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+        header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 0;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+        }
+
+        header a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        nav {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 15px 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        nav a:hover, nav a.active { color: var(--primary); }
+
+        main { padding: 60px 0; }
+
+        section { margin-bottom: 60px; }
+
+        h2 {
+            font-size: 1.75rem;
+            margin-bottom: 25px;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h2::before {
+            content: '';
+            width: 4px;
+            height: 25px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        h3 {
+            color: var(--secondary);
+            margin: 25px 0 15px;
+            font-size: 1.25rem;
+        }
+
+        p { color: var(--text-muted); margin-bottom: 15px; }
+
+        .diagram-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 30px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        .diagram-container pre {
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.8rem;
+            color: var(--text);
+            white-space: pre;
+            line-height: 1.4;
+        }
+
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .component-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 25px;
+        }
+
+        .component-card h4 {
+            color: var(--primary);
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        .component-card ul {
+            list-style: none;
+            margin-top: 15px;
+        }
+
+        .component-card li {
+            color: var(--text-muted);
+            padding: 5px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .component-card li::before {
+            content: '>';
+            position: absolute;
+            left: 0;
+            color: var(--secondary);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: var(--bg-card);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--bg-card-hover);
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        td { color: var(--text-muted); }
+
+        tr:last-child td { border-bottom: none; }
+
+        .flow-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+
+        .flow-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+            padding: 15px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .flow-step:last-child { border-bottom: none; }
+
+        .flow-number {
+            background: var(--primary);
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .flow-content h4 {
+            color: var(--text);
+            margin-bottom: 5px;
+        }
+
+        .flow-content p {
+            color: var(--text-muted);
+            margin: 0;
+            font-size: 0.95rem;
+        }
+
+        footer {
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            padding: 40px 0;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        footer a { color: var(--primary); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1><a href="index.html">CiRA CLAW</a> / Architecture</h1>
+        </div>
+    </header>
+
+    <nav>
+        <div class="container">
+            <ul>
+                <li><a href="index.html">Overview</a></li>
+                <li><a href="architecture.html" class="active">Architecture</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="streaming.html">Video Streaming</a></li>
+                <li><a href="rules.html">Rule Engine</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main>
+        <div class="container">
+            <section>
+                <h2>System Architecture</h2>
+                <p>CiRA CLAW follows a modular architecture with clear separation between the gateway, edge devices, and communication channels.</p>
+
+                <div class="diagram-container">
+                    <pre>
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          CiRA CLAW System                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │  Dashboard  │  │   Gateway   │  │   AI Agent   │  │   go2rtc     │  │
+│  │  (Vue.js)   │◄─┤  (Node.js)  │◄─┤  (Claude)    │  │   (WebRTC)   │  │
+│  │  Port 18790 │  │  Fastify    │  │  + Tools     │  │   Port 1984  │  │
+│  └─────────────┘  └──────┬──────┘  └──────────────┘  └──────────────┘  │
+│                          │                                               │
+│    ┌─────────────────────┼─────────────────────┐                        │
+│    ▼                     ▼                     ▼                        │
+│  ┌───────────────┐  ┌───────────┐  ┌───────────────────┐               │
+│  │ Signal Bridge │  │   MQTT    │  │     Modbus        │               │
+│  │ (Protocol     │  │  Broker   │  │     TCP Server    │               │
+│  │  Translator)  │  │           │  │     Port 502      │               │
+│  └───────────────┘  └───────────┘  └───────────────────┘               │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    Communication Channels                         │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐ │   │
+│  │  │ LINE Bot │  │ Web Chat │  │   MQTT   │  │ REST API + WS    │ │   │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘ │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                       Edge Devices (Nodes)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │                      CiRA Runtime (libcira)                        │ │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────────┐          │ │
+│  │  │  NCNN   │ │ Darknet │ │  ONNX   │ │   TensorRT      │          │ │
+│  │  │ Loader  │ │ Loader  │ │ Loader  │ │   Loader        │          │ │
+│  │  └────┬────┘ └────┬────┘ └────┬────┘ └───────┬─────────┘          │ │
+│  │       └───────────┴───────────┴──────────────┘                    │ │
+│  │                           ▼                                        │ │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────────────┐  │ │
+│  │  │   Camera    │ │   YOLO      │ │  MJPEG Stream + WebRTC      │  │ │
+│  │  │   Capture   │─┤   Decoder   │─┤  + Annotations              │  │ │
+│  │  └─────────────┘ └─────────────┘ └─────────────────────────────┘  │ │
+│  └───────────────────────────────────────────────────────────────────┘ │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                    </pre>
+                </div>
+            </section>
+
+            <section>
+                <h2>Core Components</h2>
+                <div class="component-grid">
+                    <div class="component-card">
+                        <h4>Gateway (Node.js/Fastify)</h4>
+                        <p>Central hub that manages all communication between clients, edge devices, and external services.</p>
+                        <ul>
+                            <li>HTTP REST API server</li>
+                            <li>WebSocket real-time events</li>
+                            <li>Static file serving for dashboard</li>
+                            <li>Node management and health checks</li>
+                        </ul>
+                    </div>
+
+                    <div class="component-card">
+                        <h4>Dashboard (Vue.js)</h4>
+                        <p>Modern web interface for monitoring and controlling the entire system.</p>
+                        <ul>
+                            <li>Real-time camera streams</li>
+                            <li>Device status monitoring</li>
+                            <li>Rule management UI</li>
+                            <li>AI chat interface</li>
+                        </ul>
+                    </div>
+
+                    <div class="component-card">
+                        <h4>AI Agent (Claude)</h4>
+                        <p>Conversational AI for natural language device control and queries.</p>
+                        <ul>
+                            <li>Tool use for device control</li>
+                            <li>Rule creation assistance</li>
+                            <li>Status queries and reports</li>
+                            <li>Multi-channel support</li>
+                        </ul>
+                    </div>
+
+                    <div class="component-card">
+                        <h4>go2rtc (WebRTC)</h4>
+                        <p>Low-latency video streaming server for real-time monitoring.</p>
+                        <ul>
+                            <li>WebRTC with STUN/TURN</li>
+                            <li>MJPEG source ingestion</li>
+                            <li>Multi-client streaming</li>
+                            <li>Cross-platform support</li>
+                        </ul>
+                    </div>
+
+                    <div class="component-card">
+                        <h4>Signal Bridge</h4>
+                        <p>Protocol translator that connects detection events to industrial systems.</p>
+                        <ul>
+                            <li>MQTT publishing</li>
+                            <li>Modbus register mapping</li>
+                            <li>State persistence (SQLite)</li>
+                            <li>Signal aggregation</li>
+                        </ul>
+                    </div>
+
+                    <div class="component-card">
+                        <h4>CiRA Runtime (libcira)</h4>
+                        <p>C/C++ inference engine running on edge devices.</p>
+                        <ul>
+                            <li>Multi-format model loading</li>
+                            <li>YOLO detection + NMS</li>
+                            <li>Camera capture</li>
+                            <li>HTTP streaming server</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h2>Services</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Service</th>
+                            <th>File</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Go2RTCService</strong></td>
+                            <td>go2rtc-service.ts</td>
+                            <td>Manages go2rtc process for WebRTC streaming</td>
+                        </tr>
+                        <tr>
+                            <td><strong>SignalBridge</strong></td>
+                            <td>signal-bridge.ts</td>
+                            <td>Protocol translator for MQTT/Modbus signals</td>
+                        </tr>
+                        <tr>
+                            <td><strong>RuleEngine</strong></td>
+                            <td>rule-engine.ts</td>
+                            <td>JavaScript sandbox for automation rules</td>
+                        </tr>
+                        <tr>
+                            <td><strong>CompositeRuleEngine</strong></td>
+                            <td>composite-rule-engine.ts</td>
+                            <td>Multi-source signal aggregation</td>
+                        </tr>
+                        <tr>
+                            <td><strong>ActionRunner</strong></td>
+                            <td>action-runner.ts</td>
+                            <td>Executes rule actions (alerts, MQTT, LINE)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>StateStore</strong></td>
+                            <td>state-store.ts</td>
+                            <td>SQLite persistence for signals and state</td>
+                        </tr>
+                        <tr>
+                            <td><strong>ModbusServer</strong></td>
+                            <td>modbus-server.ts</td>
+                            <td>Modbus TCP server for PLC integration</td>
+                        </tr>
+                        <tr>
+                            <td><strong>StatsCollector</strong></td>
+                            <td>stats-collector.ts</td>
+                            <td>Metrics aggregation and reporting</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section>
+                <h2>Data Flow</h2>
+
+                <h3>Detection Flow</h3>
+                <div class="flow-section">
+                    <div class="flow-step">
+                        <div class="flow-number">1</div>
+                        <div class="flow-content">
+                            <h4>Camera Capture</h4>
+                            <p>Edge device captures frames from connected camera using OpenCV.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">2</div>
+                        <div class="flow-content">
+                            <h4>Inference</h4>
+                            <p>Frame is processed through YOLO model (NCNN/Darknet/ONNX/TensorRT).</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">3</div>
+                        <div class="flow-content">
+                            <h4>Detection Output</h4>
+                            <p>Bounding boxes, labels, and confidence scores are extracted via NMS.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">4</div>
+                        <div class="flow-content">
+                            <h4>Stream & Signal</h4>
+                            <p>Annotated frame is streamed via MJPEG/WebRTC. Detection signal sent to gateway.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">5</div>
+                        <div class="flow-content">
+                            <h4>Rule Evaluation</h4>
+                            <p>Gateway evaluates rules against detection data and triggers actions.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <h3>WebRTC Streaming Flow</h3>
+                <div class="flow-section">
+                    <div class="flow-step">
+                        <div class="flow-number">1</div>
+                        <div class="flow-content">
+                            <h4>Stream Registration</h4>
+                            <p>Gateway registers node's MJPEG stream URL with go2rtc service.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">2</div>
+                        <div class="flow-content">
+                            <h4>Client Request</h4>
+                            <p>Dashboard requests WebRTC stream for a specific node.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">3</div>
+                        <div class="flow-content">
+                            <h4>WebRTC Negotiation</h4>
+                            <p>go2rtc handles SDP offer/answer and ICE candidates via STUN.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="flow-number">4</div>
+                        <div class="flow-content">
+                            <h4>Peer Connection</h4>
+                            <p>Direct peer-to-peer video stream established with ~100ms latency.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h2>Directory Structure</h2>
+                <div class="diagram-container">
+                    <pre>
+cira-claw/
+├── src/                        # Gateway source (TypeScript)
+│   ├── index.ts                # Entry point
+│   ├── gateway/                # HTTP server, WebSocket, routes
+│   │   ├── server.ts           # Fastify server setup
+│   │   ├── websocket.ts        # WebSocket handler
+│   │   └── routes/             # API route handlers
+│   ├── agent/                  # AI agent, tools, prompts
+│   │   ├── agent.ts            # Claude agent wrapper
+│   │   └── tools/              # Tool implementations
+│   ├── channels/               # Communication channels
+│   │   ├── line.ts             # LINE Bot
+│   │   ├── mqtt.ts             # MQTT client
+│   │   └── webchat.ts          # Web chat
+│   ├── services/               # Core services
+│   │   ├── go2rtc-service.ts   # WebRTC streaming
+│   │   ├── signal-bridge.ts    # Protocol bridges
+│   │   ├── rule-engine.ts      # JS rule sandbox
+│   │   ├── state-store.ts      # SQLite persistence
+│   │   └── modbus-server.ts    # Modbus TCP
+│   ├── nodes/                  # Device management
+│   │   └── manager.ts          # Node manager
+│   └── utils/                  # Utilities
+│       ├── logger.ts           # Pino logger
+│       └── config-schema.ts    # Zod schemas
+├── dashboard/                  # Vue.js web dashboard
+│   └── src/
+│       ├── pages/              # Page components
+│       └── components/         # Reusable components
+├── bin/                        # go2rtc binaries
+│   ├── go2rtc-windows-amd64.exe
+│   ├── go2rtc-linux-amd64
+│   └── go2rtc-darwin-amd64
+├── runtime/                    # CiRA Runtime (C/C++)
+│   ├── include/                # Public headers
+│   └── src/                    # Implementation
+├── workspace/                  # Default workspace template
+├── docs/                       # Documentation (HTML)
+└── cli/                        # CLI tool
+                    </pre>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>MIT License - CiRA Robotics / KMITL 2026</p>
+            <p style="margin-top: 10px;">
+                <a href="https://github.com/siridech-bo/cira-claw">GitHub</a> &bull;
+                <a href="index.html">Back to Overview</a>
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

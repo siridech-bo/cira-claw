@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Reference - CiRA CLAW</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --secondary: #10b981;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --get: #22c55e;
+            --post: #3b82f6;
+            --put: #f59e0b;
+            --delete: #ef4444;
+            --ws: #a855f7;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+        header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 0;
+        }
+
+        header h1 { font-size: 1.5rem; }
+        header a { color: var(--primary); text-decoration: none; }
+
+        nav {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 15px 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        nav a:hover, nav a.active { color: var(--primary); }
+
+        main { padding: 60px 0; }
+        section { margin-bottom: 60px; }
+
+        h2 {
+            font-size: 1.75rem;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h2::before {
+            content: '';
+            width: 4px;
+            height: 25px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .endpoint {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .endpoint-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+        }
+
+        .endpoint-header:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .method {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            min-width: 70px;
+            text-align: center;
+        }
+
+        .method.get { background: var(--get); color: white; }
+        .method.post { background: var(--post); color: white; }
+        .method.put { background: var(--put); color: white; }
+        .method.delete { background: var(--delete); color: white; }
+        .method.ws { background: var(--ws); color: white; }
+
+        .endpoint-path {
+            font-family: 'Fira Code', monospace;
+            color: var(--text);
+            font-size: 1rem;
+        }
+
+        .endpoint-desc {
+            color: var(--text-muted);
+            margin-left: auto;
+            font-size: 0.9rem;
+        }
+
+        .endpoint-body {
+            padding: 20px;
+            display: none;
+        }
+
+        .endpoint.open .endpoint-body {
+            display: block;
+        }
+
+        .code-block {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+
+        .code-block code {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: #c9d1d9;
+        }
+
+        .code-block .key { color: #7ee787; }
+        .code-block .string { color: #a5d6ff; }
+        .code-block .number { color: #79c0ff; }
+        .code-block .comment { color: #8b949e; }
+
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        .param-table th,
+        .param-table td {
+            padding: 10px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .param-table th {
+            background: var(--bg-card-hover);
+            color: var(--text);
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .param-table td { color: var(--text-muted); font-size: 0.9rem; }
+
+        .param-name {
+            font-family: 'Fira Code', monospace;
+            color: var(--primary);
+        }
+
+        .param-type {
+            background: var(--bg-card-hover);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: var(--secondary);
+        }
+
+        .required {
+            color: var(--delete);
+            font-size: 0.8rem;
+        }
+
+        h3 {
+            color: var(--secondary);
+            margin: 20px 0 10px;
+            font-size: 1rem;
+        }
+
+        .ws-events {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .ws-event {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .ws-event h4 {
+            color: var(--ws);
+            font-family: 'Fira Code', monospace;
+            margin-bottom: 8px;
+        }
+
+        .ws-event p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin: 0;
+        }
+
+        footer {
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            padding: 40px 0;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        footer a { color: var(--primary); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1><a href="index.html">CiRA CLAW</a> / API Reference</h1>
+        </div>
+    </header>
+
+    <nav>
+        <div class="container">
+            <ul>
+                <li><a href="index.html">Overview</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="api.html" class="active">API Reference</a></li>
+                <li><a href="streaming.html">Video Streaming</a></li>
+                <li><a href="rules.html">Rule Engine</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main>
+        <div class="container">
+            <section>
+                <h2>REST API</h2>
+                <p style="color: var(--text-muted); margin-bottom: 30px;">
+                    Base URL: <code style="background: var(--bg-card); padding: 4px 8px; border-radius: 4px;">http://localhost:18790</code>
+                </p>
+
+                <!-- Gateway Status -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method get">GET</span>
+                        <span class="endpoint-path">/api/status</span>
+                        <span class="endpoint-desc">Get gateway status</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Response</h3>
+                        <div class="code-block">
+                            <code>{
+  <span class="key">"status"</span>: <span class="string">"running"</span>,
+  <span class="key">"version"</span>: <span class="string">"1.0.0"</span>,
+  <span class="key">"uptime"</span>: <span class="number">3600</span>,
+  <span class="key">"nodeCount"</span>: <span class="number">3</span>,
+  <span class="key">"go2rtcEnabled"</span>: <span class="number">true</span>
+}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- List Nodes -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method get">GET</span>
+                        <span class="endpoint-path">/api/nodes</span>
+                        <span class="endpoint-desc">List all nodes</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Response</h3>
+                        <div class="code-block">
+                            <code>[
+  {
+    <span class="key">"id"</span>: <span class="string">"jetson-line1"</span>,
+    <span class="key">"name"</span>: <span class="string">"Production Line 1"</span>,
+    <span class="key">"type"</span>: <span class="string">"jetson-nano"</span>,
+    <span class="key">"host"</span>: <span class="string">"192.168.1.101"</span>,
+    <span class="key">"status"</span>: <span class="string">"online"</span>,
+    <span class="key">"lastSeen"</span>: <span class="string">"2026-05-29T12:00:00Z"</span>
+  }
+]</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Get Node -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method get">GET</span>
+                        <span class="endpoint-path">/api/nodes/:id</span>
+                        <span class="endpoint-desc">Get node details</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Parameters</h3>
+                        <table class="param-table">
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Description</th>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">id</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td>Node ID <span class="required">required</span></td>
+                            </tr>
+                        </table>
+                        <h3>Response</h3>
+                        <div class="code-block">
+                            <code>{
+  <span class="key">"id"</span>: <span class="string">"jetson-line1"</span>,
+  <span class="key">"name"</span>: <span class="string">"Production Line 1"</span>,
+  <span class="key">"type"</span>: <span class="string">"jetson-nano"</span>,
+  <span class="key">"host"</span>: <span class="string">"192.168.1.101"</span>,
+  <span class="key">"ssh"</span>: { <span class="key">"user"</span>: <span class="string">"cira"</span>, <span class="key">"port"</span>: <span class="number">22</span> },
+  <span class="key">"runtime"</span>: { <span class="key">"port"</span>: <span class="number">8080</span> },
+  <span class="key">"models"</span>: [{ <span class="key">"name"</span>: <span class="string">"scratch_v3"</span>, <span class="key">"task"</span>: <span class="string">"detection"</span> }]
+}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Get Node Status -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method get">GET</span>
+                        <span class="endpoint-path">/api/nodes/:id/status</span>
+                        <span class="endpoint-desc">Check node health</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Response</h3>
+                        <div class="code-block">
+                            <code>{
+  <span class="key">"online"</span>: <span class="number">true</span>,
+  <span class="key">"fps"</span>: <span class="number">24.5</span>,
+  <span class="key">"inferenceTime"</span>: <span class="number">42</span>,
+  <span class="key">"model"</span>: <span class="string">"scratch_v3"</span>,
+  <span class="key">"uptime"</span>: <span class="number">86400</span>
+}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Get Stream URLs -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method get">GET</span>
+                        <span class="endpoint-path">/api/nodes/:id/stream</span>
+                        <span class="endpoint-desc">Get stream URLs (MJPEG + WebRTC)</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Response</h3>
+                        <div class="code-block">
+                            <code>{
+  <span class="key">"nodeId"</span>: <span class="string">"jetson-line1"</span>,
+  <span class="key">"streams"</span>: {
+    <span class="key">"mjpeg"</span>: <span class="string">"http://192.168.1.101:8080/stream/annotated"</span>,
+    <span class="key">"raw_mjpeg"</span>: <span class="string">"http://192.168.1.101:8080/stream/raw"</span>,
+    <span class="key">"websocket"</span>: <span class="string">"ws://192.168.1.101:8080/ws/video"</span>,
+    <span class="key">"webrtc"</span>: <span class="string">"http://localhost:1984/api/webrtc?src=jetson-line1-annotated"</span>,
+    <span class="key">"raw_webrtc"</span>: <span class="string">"http://localhost:1984/api/webrtc?src=jetson-line1-raw"</span>
+  },
+  <span class="key">"go2rtcEnabled"</span>: <span class="number">true</span>
+}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Get Snapshot -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method get">GET</span>
+                        <span class="endpoint-path">/api/nodes/:id/snapshot</span>
+                        <span class="endpoint-desc">Get camera snapshot</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Query Parameters</h3>
+                        <table class="param-table">
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Description</th>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">annotated</span></td>
+                                <td><span class="param-type">boolean</span></td>
+                                <td>Include detection overlays (default: true)</td>
+                            </tr>
+                        </table>
+                        <h3>Response</h3>
+                        <p style="color: var(--text-muted);">Returns JPEG image with Content-Type: image/jpeg</p>
+                    </div>
+                </div>
+
+                <!-- Switch Model -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method post">POST</span>
+                        <span class="endpoint-path">/api/nodes/:id/model</span>
+                        <span class="endpoint-desc">Switch active model</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Request Body</h3>
+                        <div class="code-block">
+                            <code>{
+  <span class="key">"model"</span>: <span class="string">"yolov8n"</span>
+}</code>
+                        </div>
+                        <h3>Response</h3>
+                        <div class="code-block">
+                            <code>{
+  <span class="key">"success"</span>: <span class="number">true</span>,
+  <span class="key">"model"</span>: <span class="string">"yolov8n"</span>
+}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- List Rules -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method get">GET</span>
+                        <span class="endpoint-path">/api/rules</span>
+                        <span class="endpoint-desc">List automation rules</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Response</h3>
+                        <div class="code-block">
+                            <code>[
+  {
+    <span class="key">"id"</span>: <span class="string">"rule-001"</span>,
+    <span class="key">"name"</span>: <span class="string">"Defect Alert"</span>,
+    <span class="key">"enabled"</span>: <span class="number">true</span>,
+    <span class="key">"nodeId"</span>: <span class="string">"jetson-line1"</span>,
+    <span class="key">"trigger"</span>: <span class="string">"detection"</span>
+  }
+]</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Create Rule -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method post">POST</span>
+                        <span class="endpoint-path">/api/rules</span>
+                        <span class="endpoint-desc">Create automation rule</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Request Body</h3>
+                        <div class="code-block">
+                            <code>{
+  <span class="key">"name"</span>: <span class="string">"Defect Alert"</span>,
+  <span class="key">"nodeId"</span>: <span class="string">"jetson-line1"</span>,
+  <span class="key">"trigger"</span>: <span class="string">"detection"</span>,
+  <span class="key">"code"</span>: <span class="string">"function evaluate(ctx) { ... }"</span>,
+  <span class="key">"params"</span>: { <span class="key">"threshold"</span>: <span class="number">3</span> }
+}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Query Signals -->
+                <div class="endpoint" onclick="this.classList.toggle('open')">
+                    <div class="endpoint-header">
+                        <span class="method get">GET</span>
+                        <span class="endpoint-path">/api/signals</span>
+                        <span class="endpoint-desc">Query signal history</span>
+                    </div>
+                    <div class="endpoint-body">
+                        <h3>Query Parameters</h3>
+                        <table class="param-table">
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Description</th>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">nodeId</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td>Filter by node</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">type</span></td>
+                                <td><span class="param-type">string</span></td>
+                                <td>Signal type (detection, vibration, anomaly)</td>
+                            </tr>
+                            <tr>
+                                <td><span class="param-name">limit</span></td>
+                                <td><span class="param-type">number</span></td>
+                                <td>Max results (default: 100)</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h2>WebSocket Events</h2>
+                <p style="color: var(--text-muted); margin-bottom: 20px;">
+                    Connect to <code style="background: var(--bg-card); padding: 4px 8px; border-radius: 4px;">ws://localhost:18790/ws</code>
+                </p>
+
+                <div class="ws-events">
+                    <div class="ws-event">
+                        <h4>node:status</h4>
+                        <p>Node online/offline status change</p>
+                    </div>
+                    <div class="ws-event">
+                        <h4>node:detection</h4>
+                        <p>Real-time detection results from nodes</p>
+                    </div>
+                    <div class="ws-event">
+                        <h4>signal:update</h4>
+                        <p>Signal value changes from bridges</p>
+                    </div>
+                    <div class="ws-event">
+                        <h4>rule:triggered</h4>
+                        <p>Rule execution and action results</p>
+                    </div>
+                    <div class="ws-event">
+                        <h4>page:reload</h4>
+                        <p>Server-triggered page reload for memory management</p>
+                    </div>
+                    <div class="ws-event">
+                        <h4>page:reload_warning</h4>
+                        <p>Warning before scheduled page reload</p>
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 30px;">Example: Subscribe to Detection Events</h3>
+                <div class="code-block">
+                    <code><span class="comment">// Connect to WebSocket</span>
+const ws = new WebSocket(<span class="string">'ws://localhost:18790/ws'</span>);
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+
+  if (msg.type === <span class="string">'node:detection'</span>) {
+    console.log(<span class="string">'Detections:'</span>, msg.payload.detections);
+  }
+
+  if (msg.type === <span class="string">'page:reload_warning'</span>) {
+    console.log(<span class="string">'Page will reload in'</span>, msg.payload.secondsUntilReload, <span class="string">'seconds'</span>);
+  }
+};</code>
+                </div>
+            </section>
+
+            <section>
+                <h2>Chat WebSocket</h2>
+                <p style="color: var(--text-muted); margin-bottom: 20px;">
+                    Connect to <code style="background: var(--bg-card); padding: 4px 8px; border-radius: 4px;">ws://localhost:18790/chat</code> for AI agent conversations.
+                </p>
+
+                <h3>Send Message</h3>
+                <div class="code-block">
+                    <code>{
+  <span class="key">"type"</span>: <span class="string">"message"</span>,
+  <span class="key">"content"</span>: <span class="string">"What's the status of all devices?"</span>
+}</code>
+                </div>
+
+                <h3>Receive Response</h3>
+                <div class="code-block">
+                    <code>{
+  <span class="key">"type"</span>: <span class="string">"response"</span>,
+  <span class="key">"content"</span>: <span class="string">"All 3 devices are online. Line 1 is detecting..."</span>,
+  <span class="key">"toolCalls"</span>: [...]
+}</code>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>MIT License - CiRA Robotics / KMITL 2026</p>
+            <p style="margin-top: 10px;">
+                <a href="https://github.com/siridech-bo/cira-claw">GitHub</a> &bull;
+                <a href="index.html">Back to Overview</a>
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

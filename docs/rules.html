@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rule Engine - CiRA CLAW</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --secondary: #10b981;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --accent: #f59e0b;
+            --purple: #a855f7;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+        header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 0;
+        }
+
+        header h1 { font-size: 1.5rem; }
+        header a { color: var(--primary); text-decoration: none; }
+
+        nav {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 15px 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        nav a:hover, nav a.active { color: var(--primary); }
+
+        main { padding: 60px 0; }
+        section { margin-bottom: 60px; }
+
+        h2 {
+            font-size: 1.75rem;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h2::before {
+            content: '';
+            width: 4px;
+            height: 25px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        h3 {
+            color: var(--secondary);
+            margin: 25px 0 15px;
+            font-size: 1.25rem;
+        }
+
+        p { color: var(--text-muted); margin-bottom: 15px; }
+
+        .code-block {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+
+        .code-block code {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: #c9d1d9;
+        }
+
+        .code-block .comment { color: #8b949e; }
+        .code-block .keyword { color: #ff7b72; }
+        .code-block .function { color: #d2a8ff; }
+        .code-block .string { color: #a5d6ff; }
+        .code-block .number { color: #79c0ff; }
+        .code-block .key { color: #7ee787; }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 25px;
+        }
+
+        .feature-card h4 {
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .feature-card p {
+            color: var(--text-muted);
+            margin: 0;
+            font-size: 0.95rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: var(--bg-card);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--bg-card-hover);
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        td { color: var(--text-muted); }
+
+        tr:last-child td { border-bottom: none; }
+
+        .action-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .action-badge.alert { background: #ef4444; color: white; }
+        .action-badge.mqtt { background: var(--secondary); color: white; }
+        .action-badge.line { background: #06c755; color: white; }
+        .action-badge.modbus { background: var(--purple); color: white; }
+        .action-badge.webhook { background: var(--primary); color: white; }
+
+        .info-box {
+            background: var(--bg-card);
+            border-left: 4px solid var(--primary);
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .info-box.tip {
+            border-left-color: var(--secondary);
+        }
+
+        .info-box h4 {
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .info-box.tip h4 {
+            color: var(--secondary);
+        }
+
+        .context-table {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .context-table .section-header {
+            background: var(--bg-card-hover);
+            padding: 12px 20px;
+            color: var(--text);
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .context-table .property {
+            display: flex;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .context-table .property:last-child {
+            border-bottom: none;
+        }
+
+        .context-table .prop-name {
+            font-family: 'Fira Code', monospace;
+            color: var(--primary);
+            min-width: 200px;
+        }
+
+        .context-table .prop-type {
+            color: var(--secondary);
+            min-width: 100px;
+            font-size: 0.85rem;
+        }
+
+        .context-table .prop-desc {
+            color: var(--text-muted);
+        }
+
+        .example-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .example-card .example-header {
+            background: var(--bg-card-hover);
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .example-card .example-header h4 {
+            color: var(--text);
+            margin: 0;
+        }
+
+        .example-card .example-body {
+            padding: 20px;
+        }
+
+        footer {
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            padding: 40px 0;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        footer a { color: var(--primary); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1><a href="index.html">CiRA CLAW</a> / Rule Engine</h1>
+        </div>
+    </header>
+
+    <nav>
+        <div class="container">
+            <ul>
+                <li><a href="index.html">Overview</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="streaming.html">Video Streaming</a></li>
+                <li><a href="rules.html" class="active">Rule Engine</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main>
+        <div class="container">
+            <section>
+                <h2>Overview</h2>
+                <p>The CiRA CLAW Rule Engine allows you to create JavaScript automation rules that respond to detection events, signals from MQTT/Modbus, and other triggers. Rules are executed in a secure sandbox environment with access to detection data and system context.</p>
+
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h4>JavaScript Sandbox</h4>
+                        <p>Rules run in isolated-vm for security. Full ES6 support with controlled API access.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Visual Flow Diagrams</h4>
+                        <p>Auto-generated Mermaid diagrams visualize rule logic and decision paths.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>AI Quick Edit</h4>
+                        <p>Modify rules using natural language with Claude AI assistance.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Real-time Monitor</h4>
+                        <p>Watch rule executions live with performance metrics and debugging.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Signal Integration</h4>
+                        <p>React to signals from MQTT, Modbus, and detection events together.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Multiple Actions</h4>
+                        <p>Trigger alerts, MQTT publish, LINE notifications, Modbus writes, and more.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h2>Rule Structure</h2>
+                <p>Every rule must export an <code>evaluate</code> function that receives a context object and returns a result.</p>
+
+                <div class="code-block">
+                    <code><span class="comment">// Basic rule structure</span>
+<span class="keyword">function</span> <span class="function">evaluate</span>(ctx) {
+  <span class="comment">// Access detection data</span>
+  <span class="keyword">const</span> detections = ctx.detections;
+  <span class="keyword">const</span> params = ctx.params;
+
+  <span class="comment">// Your logic here...</span>
+  <span class="keyword">if</span> (someCondition) {
+    <span class="keyword">return</span> {
+      triggered: <span class="number">true</span>,
+      action: <span class="string">'alert'</span>,
+      data: { <span class="comment">/* custom data */</span> }
+    };
+  }
+
+  <span class="keyword">return</span> { triggered: <span class="number">false</span> };
+}</code>
+                </div>
+            </section>
+
+            <section>
+                <h2>Context Object (ctx)</h2>
+                <p>The context object provides access to all detection data, signals, and configuration.</p>
+
+                <div class="context-table">
+                    <div class="section-header">Detection Data</div>
+                    <div class="property">
+                        <span class="prop-name">ctx.detections</span>
+                        <span class="prop-type">Array</span>
+                        <span class="prop-desc">Array of detected objects with label, confidence, bbox</span>
+                    </div>
+                    <div class="property">
+                        <span class="prop-name">ctx.detections[].label</span>
+                        <span class="prop-type">string</span>
+                        <span class="prop-desc">Class label (e.g., "scratch", "person")</span>
+                    </div>
+                    <div class="property">
+                        <span class="prop-name">ctx.detections[].confidence</span>
+                        <span class="prop-type">number</span>
+                        <span class="prop-desc">Confidence score (0.0 - 1.0)</span>
+                    </div>
+                    <div class="property">
+                        <span class="prop-name">ctx.detections[].bbox</span>
+                        <span class="prop-type">object</span>
+                        <span class="prop-desc">Bounding box {x, y, width, height}</span>
+                    </div>
+
+                    <div class="section-header">Rule Configuration</div>
+                    <div class="property">
+                        <span class="prop-name">ctx.params</span>
+                        <span class="prop-type">object</span>
+                        <span class="prop-desc">User-defined parameters from rule config</span>
+                    </div>
+                    <div class="property">
+                        <span class="prop-name">ctx.nodeId</span>
+                        <span class="prop-type">string</span>
+                        <span class="prop-desc">ID of the node that triggered the rule</span>
+                    </div>
+                    <div class="property">
+                        <span class="prop-name">ctx.ruleId</span>
+                        <span class="prop-type">string</span>
+                        <span class="prop-desc">ID of the current rule</span>
+                    </div>
+
+                    <div class="section-header">Signals (Protocol Bridges)</div>
+                    <div class="property">
+                        <span class="prop-name">ctx.signal</span>
+                        <span class="prop-type">object</span>
+                        <span class="prop-desc">Current signal values from all sources</span>
+                    </div>
+                    <div class="property">
+                        <span class="prop-name">ctx.signal.vibration</span>
+                        <span class="prop-type">number</span>
+                        <span class="prop-desc">Vibration sensor value (if available)</span>
+                    </div>
+                    <div class="property">
+                        <span class="prop-name">ctx.signal.anomaly</span>
+                        <span class="prop-type">number</span>
+                        <span class="prop-desc">Anomaly detection score (if available)</span>
+                    </div>
+
+                    <div class="section-header">Timing</div>
+                    <div class="property">
+                        <span class="prop-name">ctx.timestamp</span>
+                        <span class="prop-type">number</span>
+                        <span class="prop-desc">Unix timestamp of the detection event</span>
+                    </div>
+                    <div class="property">
+                        <span class="prop-name">ctx.frameNumber</span>
+                        <span class="prop-type">number</span>
+                        <span class="prop-desc">Frame number from the video stream</span>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h2>Return Value</h2>
+                <p>The <code>evaluate</code> function must return an object indicating whether the rule was triggered and what action to take.</p>
+
+                <div class="code-block">
+                    <code><span class="comment">// Return when NOT triggered</span>
+<span class="keyword">return</span> { triggered: <span class="number">false</span> };
+
+<span class="comment">// Return when triggered</span>
+<span class="keyword">return</span> {
+  triggered: <span class="number">true</span>,
+  action: <span class="string">'alert'</span>,       <span class="comment">// Action type</span>
+  data: {                    <span class="comment">// Custom data passed to action</span>
+    count: <span class="number">5</span>,
+    severity: <span class="string">'high'</span>,
+    message: <span class="string">'Defects detected!'</span>
+  }
+};</code>
+                </div>
+            </section>
+
+            <section>
+                <h2>Action Types</h2>
+                <p>Rules can trigger various actions when conditions are met.</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Action</th>
+                            <th>Description</th>
+                            <th>Data Properties</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="action-badge alert">alert</span></td>
+                            <td>Send alert to dashboard and connected clients</td>
+                            <td><code>message</code>, <code>severity</code></td>
+                        </tr>
+                        <tr>
+                            <td><span class="action-badge mqtt">mqtt_publish</span></td>
+                            <td>Publish message to MQTT topic</td>
+                            <td><code>topic</code>, <code>payload</code>, <code>qos</code></td>
+                        </tr>
+                        <tr>
+                            <td><span class="action-badge line">line_notify</span></td>
+                            <td>Send LINE notification</td>
+                            <td><code>message</code>, <code>imageUrl</code></td>
+                        </tr>
+                        <tr>
+                            <td><span class="action-badge modbus">modbus_write</span></td>
+                            <td>Write to Modbus register</td>
+                            <td><code>address</code>, <code>value</code></td>
+                        </tr>
+                        <tr>
+                            <td><span class="action-badge webhook">webhook</span></td>
+                            <td>Call external HTTP endpoint</td>
+                            <td><code>url</code>, <code>method</code>, <code>body</code></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section>
+                <h2>Examples</h2>
+
+                <div class="example-card">
+                    <div class="example-header">
+                        <h4>Defect Count Threshold</h4>
+                    </div>
+                    <div class="example-body">
+                        <p style="color: var(--text-muted); margin-bottom: 15px;">Alert when the number of detected defects exceeds a threshold.</p>
+                        <div class="code-block">
+                            <code><span class="keyword">function</span> <span class="function">evaluate</span>(ctx) {
+  <span class="keyword">const</span> defects = ctx.detections.filter(d => d.label === <span class="string">'scratch'</span>);
+
+  <span class="keyword">if</span> (defects.length >= ctx.params.threshold) {
+    <span class="keyword">return</span> {
+      triggered: <span class="number">true</span>,
+      action: <span class="string">'alert'</span>,
+      data: {
+        count: defects.length,
+        severity: defects.length >= <span class="number">5</span> ? <span class="string">'critical'</span> : <span class="string">'warning'</span>,
+        message: <span class="string">`Detected ${defects.length} defects on ${ctx.nodeId}`</span>
+      }
+    };
+  }
+
+  <span class="keyword">return</span> { triggered: <span class="number">false</span> };
+}
+
+<span class="comment">// Rule params: { threshold: 3 }</span></code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="example-card">
+                    <div class="example-header">
+                        <h4>MQTT Publish Detection Counts</h4>
+                    </div>
+                    <div class="example-body">
+                        <p style="color: var(--text-muted); margin-bottom: 15px;">Publish detection counts to MQTT for external systems.</p>
+                        <div class="code-block">
+                            <code><span class="keyword">function</span> <span class="function">evaluate</span>(ctx) {
+  <span class="keyword">const</span> counts = {};
+
+  ctx.detections.forEach(d => {
+    counts[d.label] = (counts[d.label] || <span class="number">0</span>) + <span class="number">1</span>;
+  });
+
+  <span class="keyword">return</span> {
+    triggered: <span class="number">true</span>,
+    action: <span class="string">'mqtt_publish'</span>,
+    data: {
+      topic: <span class="string">`cira/${ctx.nodeId}/detections`</span>,
+      payload: JSON.stringify({
+        timestamp: ctx.timestamp,
+        counts: counts,
+        total: ctx.detections.length
+      }),
+      qos: <span class="number">1</span>
+    }
+  };
+}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="example-card">
+                    <div class="example-header">
+                        <h4>Signal-Based Alert (Vibration + Detection)</h4>
+                    </div>
+                    <div class="example-body">
+                        <p style="color: var(--text-muted); margin-bottom: 15px;">Combine vibration sensor data with visual detection for anomaly alerts.</p>
+                        <div class="code-block">
+                            <code><span class="keyword">function</span> <span class="function">evaluate</span>(ctx) {
+  <span class="keyword">const</span> hasVisualAnomaly = ctx.detections.some(d =>
+    d.label === <span class="string">'anomaly'</span> && d.confidence > <span class="number">0.8</span>
+  );
+
+  <span class="keyword">const</span> highVibration = ctx.signal?.vibration > ctx.params.vibrationThreshold;
+
+  <span class="comment">// Alert only when both conditions are met</span>
+  <span class="keyword">if</span> (hasVisualAnomaly && highVibration) {
+    <span class="keyword">return</span> {
+      triggered: <span class="number">true</span>,
+      action: <span class="string">'line_notify'</span>,
+      data: {
+        message: <span class="string">`ALERT: Anomaly detected on ${ctx.nodeId}\n`</span> +
+                 <span class="string">`Vibration: ${ctx.signal.vibration}\n`</span> +
+                 <span class="string">`Visual confidence: ${ctx.detections[0].confidence.toFixed(2)}`</span>
+      }
+    };
+  }
+
+  <span class="keyword">return</span> { triggered: <span class="number">false</span> };
+}
+
+<span class="comment">// Rule params: { vibrationThreshold: 50 }</span></code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="example-card">
+                    <div class="example-header">
+                        <h4>Modbus Register Write</h4>
+                    </div>
+                    <div class="example-body">
+                        <p style="color: var(--text-muted); margin-bottom: 15px;">Write detection count to Modbus register for PLC integration.</p>
+                        <div class="code-block">
+                            <code><span class="keyword">function</span> <span class="function">evaluate</span>(ctx) {
+  <span class="keyword">const</span> defectCount = ctx.detections.filter(d =>
+    d.label === ctx.params.targetClass
+  ).length;
+
+  <span class="keyword">return</span> {
+    triggered: <span class="number">true</span>,
+    action: <span class="string">'modbus_write'</span>,
+    data: {
+      address: ctx.params.registerAddress,
+      value: Math.min(defectCount, <span class="number">65535</span>) <span class="comment">// Clamp to 16-bit</span>
+    }
+  };
+}
+
+<span class="comment">// Rule params: { targetClass: 'scratch', registerAddress: 100 }</span></code>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h2>AI Quick Edit</h2>
+                <p>Use natural language to modify rules with Claude AI assistance.</p>
+
+                <div class="info-box tip">
+                    <h4>How to Use</h4>
+                    <p>In the Rules page, click the "Quick Edit" button and describe the change you want. For example:</p>
+                    <ul style="color: var(--text-muted); margin-top: 10px; margin-left: 20px;">
+                        <li>"Change the threshold from 3 to 5"</li>
+                        <li>"Add a condition to only alert during working hours"</li>
+                        <li>"Send to a different MQTT topic"</li>
+                        <li>"Also check for 'crack' detections"</li>
+                    </ul>
+                </div>
+            </section>
+
+            <section>
+                <h2>Rule Execution Monitor</h2>
+                <p>The dashboard includes a real-time rule execution monitor for debugging and performance analysis.</p>
+
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h4>Execution Log</h4>
+                        <p>See every rule evaluation with timestamp, result, and execution time.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Performance Metrics</h4>
+                        <p>Track average execution time and trigger rate per rule.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Error Highlighting</h4>
+                        <p>Quickly identify rules with errors or exceptions.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>Live Updates</h4>
+                        <p>Watch executions in real-time via WebSocket connection.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>MIT License - CiRA Robotics / KMITL 2026</p>
+            <p style="margin-top: 10px;">
+                <a href="https://github.com/siridech-bo/cira-claw">GitHub</a> &bull;
+                <a href="index.html">Back to Overview</a>
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

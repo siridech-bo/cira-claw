@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Streaming - CiRA CLAW</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --secondary: #10b981;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --accent: #f59e0b;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+        header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 0;
+        }
+
+        header h1 { font-size: 1.5rem; }
+        header a { color: var(--primary); text-decoration: none; }
+
+        nav {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 15px 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        nav a:hover, nav a.active { color: var(--primary); }
+
+        main { padding: 60px 0; }
+        section { margin-bottom: 60px; }
+
+        h2 {
+            font-size: 1.75rem;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h2::before {
+            content: '';
+            width: 4px;
+            height: 25px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        h3 {
+            color: var(--secondary);
+            margin: 25px 0 15px;
+            font-size: 1.25rem;
+        }
+
+        p { color: var(--text-muted); margin-bottom: 15px; }
+
+        .stream-comparison {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .stream-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 25px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stream-card.recommended {
+            border-color: var(--primary);
+        }
+
+        .stream-card.recommended::before {
+            content: 'Recommended';
+            position: absolute;
+            top: 15px;
+            right: -30px;
+            background: var(--primary);
+            color: white;
+            padding: 5px 40px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            transform: rotate(45deg);
+        }
+
+        .stream-card h4 {
+            color: var(--text);
+            font-size: 1.3rem;
+            margin-bottom: 10px;
+        }
+
+        .stream-card .latency {
+            display: inline-block;
+            background: var(--secondary);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .stream-card .latency.medium {
+            background: var(--accent);
+        }
+
+        .stream-card .latency.high {
+            background: #ef4444;
+        }
+
+        .stream-card ul {
+            list-style: none;
+            margin-top: 15px;
+        }
+
+        .stream-card li {
+            color: var(--text-muted);
+            padding: 8px 0;
+            padding-left: 25px;
+            position: relative;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stream-card li:last-child { border-bottom: none; }
+
+        .stream-card li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: var(--secondary);
+        }
+
+        .stream-card li.con::before {
+            content: '✗';
+            color: #ef4444;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: var(--bg-card);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--bg-card-hover);
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        td { color: var(--text-muted); }
+
+        tr:last-child td { border-bottom: none; }
+
+        .code-block {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+
+        .code-block code {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: #c9d1d9;
+        }
+
+        .code-block .comment { color: #8b949e; }
+        .code-block .key { color: #7ee787; }
+        .code-block .string { color: #a5d6ff; }
+        .code-block .number { color: #79c0ff; }
+
+        .info-box {
+            background: var(--bg-card);
+            border-left: 4px solid var(--primary);
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .info-box.warning {
+            border-left-color: var(--accent);
+        }
+
+        .info-box h4 {
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .info-box.warning h4 {
+            color: var(--accent);
+        }
+
+        .flow-diagram {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 30px;
+            margin: 20px 0;
+        }
+
+        .flow-diagram pre {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.8rem;
+            color: var(--text);
+            white-space: pre;
+        }
+
+        .config-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+
+        .config-card h4 {
+            color: var(--primary);
+            margin-bottom: 15px;
+        }
+
+        footer {
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            padding: 40px 0;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        footer a { color: var(--primary); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1><a href="index.html">CiRA CLAW</a> / Video Streaming</h1>
+        </div>
+    </header>
+
+    <nav>
+        <div class="container">
+            <ul>
+                <li><a href="index.html">Overview</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="streaming.html" class="active">Video Streaming</a></li>
+                <li><a href="rules.html">Rule Engine</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main>
+        <div class="container">
+            <section>
+                <h2>Streaming Modes</h2>
+                <p>CiRA CLAW supports three video streaming modes, each with different latency and compatibility characteristics. The dashboard automatically selects the best mode based on availability.</p>
+
+                <div class="stream-comparison">
+                    <div class="stream-card recommended">
+                        <h4>WebRTC (go2rtc)</h4>
+                        <span class="latency">~100ms latency</span>
+                        <p>Ultra-low latency peer-to-peer streaming via go2rtc server.</p>
+                        <ul>
+                            <li>Real-time monitoring</li>
+                            <li>Hardware acceleration</li>
+                            <li>Adaptive bitrate</li>
+                            <li>STUN/TURN support</li>
+                            <li class="con">Requires go2rtc binary</li>
+                        </ul>
+                    </div>
+
+                    <div class="stream-card">
+                        <h4>MJPEG</h4>
+                        <span class="latency medium">~500ms latency</span>
+                        <p>Motion JPEG stream over HTTP. Widely compatible fallback.</p>
+                        <ul>
+                            <li>No special setup required</li>
+                            <li>Works in all browsers</li>
+                            <li>Auto-reconnection</li>
+                            <li>Detection overlays</li>
+                            <li class="con">Higher bandwidth usage</li>
+                        </ul>
+                    </div>
+
+                    <div class="stream-card">
+                        <h4>Polling</h4>
+                        <span class="latency high">~1s latency</span>
+                        <p>Single frame requests. Last resort fallback mode.</p>
+                        <ul>
+                            <li>Maximum compatibility</li>
+                            <li>Works through proxies</li>
+                            <li>Lowest CPU usage</li>
+                            <li>Canvas-based rendering</li>
+                            <li class="con">Choppy video</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h2>Automatic Fallback</h2>
+                <p>The dashboard's CameraStream component automatically handles streaming mode selection and fallback.</p>
+
+                <div class="flow-diagram">
+                    <pre>
+┌─────────────────┐     Success     ┌─────────────────────────────┐
+│   Try WebRTC    │ ──────────────> │   WebRTC Stream Active      │
+│   (if enabled)  │                 │   (~100ms latency)          │
+└────────┬────────┘                 └─────────────────────────────┘
+         │ Fail
+         ▼
+┌─────────────────┐     Success     ┌─────────────────────────────┐
+│   Try MJPEG     │ ──────────────> │   MJPEG Stream Active       │
+│   Stream        │                 │   (~500ms latency)          │
+└────────┬────────┘                 └─────────────────────────────┘
+         │ Fail / Timeout
+         ▼
+┌─────────────────┐                 ┌─────────────────────────────┐
+│   Polling Mode  │ ──────────────> │   Frame Polling Active      │
+│   (Fallback)    │                 │   (~1s latency)             │
+└─────────────────┘                 └─────────────────────────────┘
+                    </pre>
+                </div>
+
+                <div class="info-box">
+                    <h4>Stream Watchdog</h4>
+                    <p>The dashboard monitors stream health and automatically triggers reconnection if no frames are received for 5 seconds. This handles network glitches and device restarts gracefully.</p>
+                </div>
+            </section>
+
+            <section>
+                <h2>go2rtc Configuration</h2>
+                <p>go2rtc provides WebRTC streaming with STUN/TURN support for NAT traversal.</p>
+
+                <div class="config-card">
+                    <h4>cira.json Configuration</h4>
+                    <div class="code-block">
+                        <code>{
+  <span class="key">"go2rtc"</span>: {
+    <span class="key">"enabled"</span>: <span class="number">true</span>,
+    <span class="key">"apiPort"</span>: <span class="number">1984</span>,
+    <span class="key">"webrtcPort"</span>: <span class="number">8555</span>,
+    <span class="key">"stunServers"</span>: [
+      <span class="string">"stun:stun.l.google.com:19302"</span>
+    ]
+  }
+}</code>
+                    </div>
+                </div>
+
+                <h3>Bundled Binaries</h3>
+                <p>CiRA CLAW includes go2rtc binaries for major platforms in the <code>bin/</code> directory:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Platform</th>
+                            <th>Binary</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Windows (x64)</td>
+                            <td><code>bin/go2rtc-windows-amd64.exe</code></td>
+                        </tr>
+                        <tr>
+                            <td>Linux (x64)</td>
+                            <td><code>bin/go2rtc-linux-amd64</code></td>
+                        </tr>
+                        <tr>
+                            <td>macOS (Intel)</td>
+                            <td><code>bin/go2rtc-darwin-amd64</code></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section>
+                <h2>Runtime Stream Endpoints</h2>
+                <p>Each edge device running CiRA Runtime exposes these HTTP endpoints:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>/stream/raw</code></td>
+                            <td>MJPEG</td>
+                            <td>Raw camera feed without annotations</td>
+                        </tr>
+                        <tr>
+                            <td><code>/stream/annotated</code></td>
+                            <td>MJPEG</td>
+                            <td>Stream with detection bounding boxes and labels</td>
+                        </tr>
+                        <tr>
+                            <td><code>/frame/latest</code></td>
+                            <td>JPEG</td>
+                            <td>Single frame for polling mode</td>
+                        </tr>
+                        <tr>
+                            <td><code>/api/detections</code></td>
+                            <td>JSON</td>
+                            <td>Current frame's detection results</td>
+                        </tr>
+                        <tr>
+                            <td><code>/api/stats</code></td>
+                            <td>JSON</td>
+                            <td>FPS, inference time, model info</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section>
+                <h2>Detection Persistence</h2>
+                <p>To reduce bounding box flickering, the runtime implements time-based detection persistence.</p>
+
+                <div class="info-box">
+                    <h4>How It Works</h4>
+                    <p>Detections are held for a configurable duration (default: 150ms) after they disappear from the frame. This creates smoother annotations without the distracting flicker that occurs when objects are briefly undetected between frames.</p>
+                </div>
+
+                <div class="code-block">
+                    <code><span class="comment">// Detection persistence configuration</span>
+<span class="key">DETECTION_HOLD_MS</span> = <span class="number">150</span>;  <span class="comment">// Hold annotations for 150ms</span>
+
+<span class="comment">// Detections are matched by:</span>
+<span class="comment">// - Same class label</span>
+<span class="comment">// - IoU (Intersection over Union) > 0.5</span></code>
+                </div>
+            </section>
+
+            <section>
+                <h2>Browser Memory Management</h2>
+                <p>Long-running camera streams can cause browser memory issues. CiRA CLAW implements automatic page reload to prevent OOM crashes.</p>
+
+                <div class="info-box warning">
+                    <h4>Scheduled Page Reload</h4>
+                    <p>The gateway automatically triggers page reloads every 25 minutes. A warning is sent 30 seconds before reload via WebSocket, allowing the dashboard to show a notification to users.</p>
+                </div>
+
+                <h3>WebSocket Events</h3>
+                <div class="code-block">
+                    <code><span class="comment">// 30 seconds before reload</span>
+{
+  <span class="key">"type"</span>: <span class="string">"page:reload_warning"</span>,
+  <span class="key">"payload"</span>: {
+    <span class="key">"secondsUntilReload"</span>: <span class="number">30</span>,
+    <span class="key">"timestamp"</span>: <span class="number">1717000000000</span>
+  }
+}
+
+<span class="comment">// Reload trigger</span>
+{
+  <span class="key">"type"</span>: <span class="string">"page:reload"</span>,
+  <span class="key">"payload"</span>: {
+    <span class="key">"reason"</span>: <span class="string">"scheduled_memory_cleanup"</span>,
+    <span class="key">"timestamp"</span>: <span class="number">1717000030000</span>
+  }
+}</code>
+                </div>
+            </section>
+
+            <section>
+                <h2>Usage Example</h2>
+                <p>Here's how to embed a camera stream in your own application:</p>
+
+                <div class="code-block">
+                    <code><span class="comment">// 1. Get stream URLs from API</span>
+const response = await fetch(<span class="string">'/api/nodes/jetson-line1/stream'</span>);
+const { streams, go2rtcEnabled } = await response.json();
+
+<span class="comment">// 2. Try WebRTC first (if available)</span>
+if (go2rtcEnabled && streams.webrtc) {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: <span class="string">'stun:stun.l.google.com:19302'</span> }]
+  });
+
+  pc.ontrack = (event) => {
+    videoElement.srcObject = event.streams[<span class="number">0</span>];
+  };
+
+  <span class="comment">// Negotiate with go2rtc API...</span>
+}
+
+<span class="comment">// 3. Fallback to MJPEG</span>
+else {
+  imgElement.src = streams.mjpeg;
+}
+
+<span class="comment">// 4. Ultimate fallback: polling</span>
+setInterval(() => {
+  imgElement.src = <span class="string">`${streams.mjpeg.replace('/stream/', '/frame/')}?t=${Date.now()}`</span>;
+}, <span class="number">1000</span>);</code>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>MIT License - CiRA Robotics / KMITL 2026</p>
+            <p style="margin-top: 10px;">
+                <a href="https://github.com/siridech-bo/cira-claw">GitHub</a> &bull;
+                <a href="index.html">Back to Overview</a>
+            </p>
+        </div>
+    </footer>
+</body>
+</html>
